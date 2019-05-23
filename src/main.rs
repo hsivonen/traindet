@@ -2,7 +2,8 @@ use bzip2::bufread::BzDecoder;
 use detector_char_classes::*;
 use detone::IterDecomposeVietnamese;
 use encoding_rs::Encoding;
-use encoding_rs::ISO_8859_2;
+use encoding_rs::WINDOWS_1251;
+
 use encoding_rs::WINDOWS_1250;
 use encoding_rs::WINDOWS_1250_INIT;
 use encoding_rs::WINDOWS_1251_INIT;
@@ -21,17 +22,18 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command;
 use unic_normal::StrNormalForm;
-use utf8reader::UTF8Reader;
-// use unicode_reader::CodePoints;
+// use utf8reader::UTF8Reader;
+use unicode_reader::CodePoints;
 
 struct CharMap {
-    arr: [u8; 3673],
+    arr: [u8; 3674],
 }
 
 impl CharMap {
     fn new(char_classes: &'static [&'static [char]], windows_encoding: &'static Encoding) -> Self {
-        let mut ret = CharMap { arr: [0u8; 3673] };
+        let mut ret = CharMap { arr: [0u8; 3674] };
         for (i, chars) in char_classes.iter().enumerate() {
             let class = i as u8;
             for &c in chars.iter() {
@@ -55,17 +57,17 @@ impl CharMap {
             }
         }
         if !is_latin(windows_encoding) {
-        	for c in b'a'..=b'z' {
-                ret.arr[c as usize] = 0xFE;        		
-        	}
-        	for c in b'A'..=b'Z' {
-                ret.arr[c as usize] = 0xFE;        		
-        	}
-        	if windows_encoding == WINDOWS_1256 {
-        		for &c in ARABIC_FRENCH.iter() {
-	                ret.arr[c as usize] = 0xFE;        		
-        		}
-        	}
+            for c in b'a'..=b'z' {
+                ret.arr[c as usize] = 0xFE;
+            }
+            for c in b'A'..=b'Z' {
+                ret.arr[c as usize] = 0xFE;
+            }
+            if windows_encoding == WINDOWS_1256 {
+                for &c in ARABIC_FRENCH.iter() {
+                    ret.arr[c as usize] = 0xFE;
+                }
+            }
         }
         ret
     }
@@ -113,6 +115,16 @@ impl EncodingClass {
                 ascii_classes,
                 non_ascii_classes,
             );
+
+	    let mut max = 0.0f64;
+        for &score in scores.iter() {
+            if score > max {
+                max = score;
+            }
+        }
+
+    	println!("MAX {}: {:?}", lang, max);
+
             language_scores.push(scores);
             if windows_encoding == WINDOWS_1258 {
                 let mut scores = train_one(
@@ -129,6 +141,16 @@ impl EncodingClass {
                     ascii_classes,
                     non_ascii_classes,
                 );
+
+	    let mut max = 0.0f64;
+        for &score in scores.iter() {
+            if score > max {
+                max = score;
+            }
+        }
+
+    	println!("MAX {}: {:?}", lang, max);
+
                 language_scores.push(scores);
             }
         }
@@ -137,23 +159,30 @@ impl EncodingClass {
     }
 }
 
-static ENCODING_CLASSES: [EncodingClass; 1] = [
+static ENCODING_CLASSES: [EncodingClass; 10] = [
     EncodingClass {
         char_classes: &CENTRAL,
         encodings: &[&WINDOWS_1250_INIT],
-        languages: &["pl"],
+        languages: &["pl", "hu", "sh", "cs", "ro", "sk", "hr", "sl", "bs", "sq"],
         name: "central",
     },
     EncodingClass {
         char_classes: &CYRILLIC,
         encodings: &[&WINDOWS_1251_INIT],
-        languages: &["ru"],
-        name: "vietnamese",
+        // kk, tt, tg, and os don't fit
+        // mn uses mapping to uk letters
+        languages: &["ru", "uk", "sr", "bg", "ce", "be", "mk", "mn"],
+        name: "cyrillic",
     },
     EncodingClass {
         char_classes: &WESTERN,
         encodings: &[&WINDOWS_1252_INIT],
-        languages: &["fi"],
+        // Intentionally omitting ASCII languages like en, nl, id, so, sw, various Malay-alphabet languages
+        // Should et and sq be also here?
+        languages: &[
+            "sv", "de", "fr", "it", "es", "pt", "ca", "no", "fi", "eu", "da", "et", "gl", "nn",
+            "oc", "br", "lb", "ht", "ga", "is", "an", "wa", "gd", "fo", "li",
+        ],
         name: "western",
     },
     EncodingClass {
@@ -165,25 +194,25 @@ static ENCODING_CLASSES: [EncodingClass; 1] = [
     EncodingClass {
         char_classes: &TURKISH,
         encodings: &[&WINDOWS_1254_INIT],
-        languages: &["vi"],
+        languages: &["tr", "az", "ku"],
         name: "turkish",
     },
     EncodingClass {
         char_classes: &HEBREW,
         encodings: &[&WINDOWS_1255_INIT],
-        languages: &["he"],
+        languages: &["he", "yi"],
         name: "hebrew",
     },
     EncodingClass {
         char_classes: &ARABIC,
         encodings: &[&WINDOWS_1256_INIT],
-        languages: &["ar"],
+        languages: &["ar", "fa", "ur"],
         name: "arabic",
     },
     EncodingClass {
         char_classes: &BALTIC,
         encodings: &[&WINDOWS_1257_INIT],
-        languages: &["et"],
+        languages: &["lt", "et", "lv"],
         name: "baltic",
     },
     EncodingClass {
@@ -231,7 +260,9 @@ fn count_ascii_classes(char_classes: &'static [&'static [char]]) -> (usize, usiz
 
 fn open_bzip2(path: &Path) -> impl Iterator<Item = char> {
     let dec = BzDecoder::new(BufReader::new(File::open(path).unwrap()));
-    UTF8Reader::new(BufReader::new(dec)).map(|r| r.unwrap()) //.take(50000) // XXX remove
+    CodePoints::from(BufReader::new(dec))
+        .map(|r| r.unwrap())
+        .take(50000) // XXX remove
 }
 
 fn merge(language_scores: Vec<Vec<f64>>) -> Vec<f64> {
@@ -277,6 +308,9 @@ fn compute_index(
     if x == 0 && y == 0 {
         return None;
     }
+    if x == 254 || y == 254 {
+        return None;
+    }
     if x < ascii_classes && y < ascii_classes {
         return None;
     }
@@ -302,32 +336,20 @@ fn compute_scores<I: Iterator<Item = char>>(
 
     let mut total = 0u64;
 
-    let mut prev = Some(0usize);
+    let mut prev = 0usize;
 
     for c in iter {
-        let current = if ascii_classes == 0 && c >= 'a' && c <= 'z' {
-            // For non-Latin, ASCII doesn't pair with anything. By now,
-            // windows-1256 accented French characters have been mapped
-            // to `'a'` to be caught here.
-            None
-        } else {
-            Some(classes.get(c) as usize)
-        };
-        if let (Some(prev_unwrap), Some(current_unwrap)) = (prev, current) {
-            if let Some(index) = compute_index(
-                prev_unwrap,
-                current_unwrap,
-                ascii_classes,
-                non_ascii_classes,
-            ) {
-                scores[index] += 1;
-                total += 1;
-            }
+        let current = classes.get(c) as usize;
+        if let Some(index) = compute_index(prev, current, ascii_classes, non_ascii_classes) {
+            scores[index] += 1;
+            total += 1;
         }
         prev = current;
     }
 
-    assert_eq!(scores[0], 0, "Space doesn't pair with itself.");
+    if ascii_classes == 0 {
+        assert_eq!(scores[0], 0, "Space doesn't pair with itself.");
+    }
 
     let mut float_scores = Vec::with_capacity(score_len);
     let float_total = total as f64;
@@ -385,7 +407,7 @@ fn train_one(
             ascii_classes,
             non_ascii_classes,
         )
-    } else if encoding == WINDOWS_1250 || encoding == ISO_8859_2 {
+    } else if encoding == WINDOWS_1250 {
         // Map Romanian comma-below characters to cedilla versions,
         // because legacy encodings (other than ISO-8859-16, which we
         // won't detect) only have the latter.
@@ -401,36 +423,63 @@ fn train_one(
             ascii_classes,
             non_ascii_classes,
         )
+    } else if encoding == WINDOWS_1251 {
+        // Map Mongolian characters to Ukranian substitutes
+        compute_scores(
+            iter.nfc().map(|c| match c {
+                'Ү' => 'Ї',
+                'ү' => 'ї',
+                'Ө' => 'Є',
+                'ө' => 'є',
+                _ => c,
+            }),
+            classes,
+            ascii_classes,
+            non_ascii_classes,
+        )
     } else {
         compute_scores(iter.nfc(), classes, ascii_classes, non_ascii_classes)
     }
 }
 
-fn further_than_epsilon(a: u8, b: u8) -> bool {
-    true
+fn further_than_epsilon(a: u8, b: u8, e: u8) -> bool {
+	let delta = if a < b {
+		b - a
+	} else {
+		a - b
+	};
+	delta > e
 }
 
 fn suggest_merges(scores: &Vec<u8>, encoding_class: &'static EncodingClass) {
     let (ascii_classes, non_ascii_classes) = count_ascii_classes(encoding_class.char_classes);
-    for i in 0..encoding_class.char_classes.len() {
-        'mid: for j in 0..i {
-            for k in 0..encoding_class.char_classes.len() {
-                let i_index_1 = compute_index(i, k, ascii_classes, non_ascii_classes);
-                let j_index_1 = compute_index(j, k, ascii_classes, non_ascii_classes);
-                if let (Some(i_index), Some(j_index)) = (i_index_1, j_index_1) {
-                    if further_than_epsilon(scores[i_index], scores[j_index]) {
-                        continue 'mid;
+    for e in 0..2 {
+    	println!("Epsilon = {:?} ---------------------------------", e);
+        for i in 0..encoding_class.char_classes.len() {
+            'mid: for j in 0..i {
+            	if i >= ascii_classes && j < ascii_classes || j >= ascii_classes && i < ascii_classes {
+            		// Don't suggest merging ASCII and non-ASCII
+            		continue;
+            	}
+                for k in 0..encoding_class.char_classes.len() {
+                    let i_index_1 = compute_index(i, k, ascii_classes, non_ascii_classes);
+                    let j_index_1 = compute_index(j, k, ascii_classes, non_ascii_classes);
+                    if let (Some(i_index), Some(j_index)) = (i_index_1, j_index_1) {
+                        if further_than_epsilon(scores[i_index], scores[j_index], e) {
+                            continue 'mid;
+                        }
+                    }
+                    let i_index_2 = compute_index(k, i, ascii_classes, non_ascii_classes);
+                    let j_index_2 = compute_index(k, j, ascii_classes, non_ascii_classes);
+                    if let (Some(i_index), Some(j_index)) = (i_index_2, j_index_2) {
+                        if further_than_epsilon(scores[i_index], scores[j_index], e) {
+                            continue 'mid;
+                        }
                     }
                 }
-                let i_index_2 = compute_index(k, i, ascii_classes, non_ascii_classes);
-                let j_index_2 = compute_index(k, j, ascii_classes, non_ascii_classes);
-                if let (Some(i_index), Some(j_index)) = (i_index_2, j_index_2) {
-                    if further_than_epsilon(scores[i_index], scores[j_index]) {
-                        continue 'mid;
-                    }
-                }
+                // Suggest
+                println!("Epsilon: {:?}, {}, merge: {:?} & {:?}", e, encoding_class.name, encoding_class.char_classes[i], encoding_class.char_classes[j]);
             }
-            // Suggest
         }
     }
 }
@@ -449,7 +498,7 @@ fn train_with_dir(dir: &Path) {
         }
     }
     let mut scores = Vec::with_capacity(float_scores.len());
-    for (vec, encoding_class) in float_scores {
+    for (vec, encoding_class) in float_scores.iter() {
         let mut byte_vec = Vec::new();
         byte_vec.resize(vec.len(), 0u8);
         for (b, f) in byte_vec.iter_mut().zip(vec.into_iter()) {
@@ -458,9 +507,48 @@ fn train_with_dir(dir: &Path) {
         scores.push((byte_vec, encoding_class));
     }
 
+    for (float_vec, encoding_class) in float_scores.iter() {
+	    let mut max = 0.0f64;
+        for &score in float_vec.iter() {
+            if score > max {
+                max = score;
+            }
+        }
+
+    	println!("MAX {}: {:?}", encoding_class.name, max);
+	}
+
+    for (byte_vec, encoding_class) in scores.iter() {
+		println!("MAX byte {}: {:?}", encoding_class.name, byte_vec.iter().max());
+    }
+
     for (byte_vec, encoding_class) in scores.iter() {
         suggest_merges(&byte_vec, encoding_class);
     }
+}
+
+fn download_corpus(dir: &Path) {
+    let prefix = "https://ftp.acc.umu.se/mirror/wikimedia.org/dumps/";
+    let date = "20190420";
+    let mut curl = Command::new("curl");
+    curl.current_dir(dir);
+    curl.arg("--remote-name-all");
+    for encoding_class in ENCODING_CLASSES.iter() {
+        for lang in encoding_class.languages.iter() {
+            let mut url = String::new();
+            url.push_str(prefix);
+            url.push_str(lang);
+            url.push_str("wiki/");
+            url.push_str(date);
+            url.push_str("/");
+            url.push_str(lang);
+            url.push_str("wiki-");
+            url.push_str(date);
+            url.push_str("-pages-articles.xml.bz2");
+            curl.arg(url);
+        }
+    }
+    curl.output().expect("Executing curl failed");
 }
 
 fn main() {
@@ -470,11 +558,13 @@ fn main() {
         std::process::exit(-1);
     }
     if let Some(path) = args.next() {
-        if args.next().is_some() {
-            eprintln!("Error: Too many arguments.");
-            std::process::exit(-3);
+        if let Some(download) = args.next() {
+            if "--download" == download {
+                download_corpus(Path::new(&path));
+            }
+        } else {
+            train_with_dir(Path::new(&path));
         }
-        train_with_dir(Path::new(&path));
     } else {
         eprintln!("Error: Too few arguments.");
         std::process::exit(-2);
