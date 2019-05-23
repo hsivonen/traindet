@@ -31,6 +31,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "detector_char_classes"
 version = "0.1.0"
+dependencies = [
+ "encoding_rs 0.8.17 (registry+https://github.com/rust-lang/crates.io-index)",
+]
 
 [[package]]
 name = "detone"
@@ -60,6 +63,7 @@ dependencies = [
  "encoding_rs 0.8.17 (registry+https://github.com/rust-lang/crates.io-index)",
  "unic-normal 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "unicode_reader 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "utf8reader 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -128,6 +132,11 @@ dependencies = [
  "unicode-segmentation 1.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
+[[package]]
+name = "utf8reader"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
 [metadata]
 "checksum bzip2 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)" = "42b7c3cbf0fa9c1b82308d57191728ca0256cb821220f4e2fd410a72ade26e3b"
 "checksum bzip2-sys 0.1.7 (registry+https://github.com/rust-lang/crates.io-index)" = "6584aa36f5ad4c9247f5323b0a42f37802b37a836f0ad87084d7a33961abe25f"
@@ -145,3 +154,4 @@ dependencies = [
 "checksum unic-ucd-version 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)" = "96bd2f2237fe450fcd0a1d2f5f4e91711124f7857ba2e964247776ebeeb7b0c4"
 "checksum unicode-segmentation 1.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "1967f4cdfc355b37fd76d2a954fb2ed3871034eb4f26d60537d88795cfc332a9"
 "checksum unicode_reader 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "001b27e8f5e9da465b3584051a3a3d2ebefee4f8595c49e96cc1deec9667e4cc"
+"checksum utf8reader 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "31add7b376bd6ae962e31fcdd0e7b6ceea137c47edea6ef1eba7ae1ded67cf0c"

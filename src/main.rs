@@ -2,17 +2,82 @@ use bzip2::bufread::BzDecoder;
 use detector_char_classes::*;
 use detone::IterDecomposeVietnamese;
 use encoding_rs::Encoding;
+use encoding_rs::ISO_8859_2;
+use encoding_rs::WINDOWS_1250;
+use encoding_rs::WINDOWS_1250_INIT;
+use encoding_rs::WINDOWS_1251_INIT;
+use encoding_rs::WINDOWS_1252_INIT;
+use encoding_rs::WINDOWS_1253_INIT;
 use encoding_rs::WINDOWS_1254;
+use encoding_rs::WINDOWS_1254_INIT;
+use encoding_rs::WINDOWS_1255_INIT;
 use encoding_rs::WINDOWS_1256;
+use encoding_rs::WINDOWS_1256_INIT;
+use encoding_rs::WINDOWS_1257_INIT;
 use encoding_rs::WINDOWS_1258;
 use encoding_rs::WINDOWS_1258_INIT;
-use std::collections::HashMap;
+use encoding_rs::WINDOWS_874_INIT;
 use std::fs::File;
 use std::io::BufReader;
-use std::io::Read;
 use std::path::Path;
+use std::path::PathBuf;
 use unic_normal::StrNormalForm;
-use unicode_reader::CodePoints;
+use utf8reader::UTF8Reader;
+// use unicode_reader::CodePoints;
+
+struct CharMap {
+    arr: [u8; 3673],
+}
+
+impl CharMap {
+    fn new(char_classes: &'static [&'static [char]], windows_encoding: &'static Encoding) -> Self {
+        let mut ret = CharMap { arr: [0u8; 3673] };
+        for (i, chars) in char_classes.iter().enumerate() {
+            let class = i as u8;
+            for &c in chars.iter() {
+                ret.arr[c as usize] = class;
+
+                let upper = if windows_encoding == WINDOWS_1254 && c == 'i' {
+                    'İ'
+                } else if c == 'ς' {
+                    // Intentionally not handling final sigma to match
+                    // detection-time mapping.
+                    continue;
+                } else {
+                    let mut iter = c.to_uppercase();
+                    let first = iter.next().unwrap();
+                    if let Some(_) = iter.next() {
+                        continue;
+                    }
+                    first
+                };
+                ret.arr[upper as usize] = class;
+            }
+        }
+        if !is_latin(windows_encoding) {
+        	for c in b'a'..=b'z' {
+                ret.arr[c as usize] = 0xFE;        		
+        	}
+        	for c in b'A'..=b'Z' {
+                ret.arr[c as usize] = 0xFE;        		
+        	}
+        	if windows_encoding == WINDOWS_1256 {
+        		for &c in ARABIC_FRENCH.iter() {
+	                ret.arr[c as usize] = 0xFE;        		
+        		}
+        	}
+        }
+        ret
+    }
+
+    fn get(&self, c: char) -> u8 {
+        let s = c as usize;
+        if s < self.arr.len() {
+            return self.arr[s];
+        }
+        0u8
+    }
+}
 
 #[derive(Debug)]
 struct EncodingClass {
@@ -23,27 +88,47 @@ struct EncodingClass {
 }
 
 impl EncodingClass {
-    fn train(&'static self) -> (Vec<f64>, &'static Self) {
-        let mut map = HashMap::new();
-        for (i, chars) in self.char_classes.iter().enumerate() {
-            let class = i as u8;
-            for &c in chars.iter() {
-                map.insert(c, class);
-            }
-        }
-
+    fn train(&'static self, dir: &Path) -> (Vec<f64>, &'static Self) {
         let windows_encoding = self.encodings[0];
+
+        let map = CharMap::new(self.char_classes, windows_encoding);
+
         let (ascii_classes, non_ascii_classes) = count_ascii_classes(self.char_classes);
 
         let mut language_scores = Vec::with_capacity(self.languages.len());
         for lang in self.languages {
-        	eprintln!("Training {:?}", lang);
-            let mut scores = train_one(Path::new(lang), &map, ascii_classes, non_ascii_classes, windows_encoding, false);
-            divide_by_class_size(&mut scores, self.char_classes, ascii_classes, non_ascii_classes);
+            eprintln!("Training {:?}", lang);
+            let corpus = find_file(dir, lang);
+            let mut scores = train_one(
+                &corpus,
+                &map,
+                ascii_classes,
+                non_ascii_classes,
+                windows_encoding,
+                false,
+            );
+            divide_by_class_size(
+                &mut scores,
+                self.char_classes,
+                ascii_classes,
+                non_ascii_classes,
+            );
             language_scores.push(scores);
             if windows_encoding == WINDOWS_1258 {
-                let mut scores = train_one(Path::new(lang), &map, ascii_classes, non_ascii_classes, windows_encoding, true);
-                divide_by_class_size(&mut scores, self.char_classes, ascii_classes, non_ascii_classes);
+                let mut scores = train_one(
+                    &corpus,
+                    &map,
+                    ascii_classes,
+                    non_ascii_classes,
+                    windows_encoding,
+                    true,
+                );
+                divide_by_class_size(
+                    &mut scores,
+                    self.char_classes,
+                    ascii_classes,
+                    non_ascii_classes,
+                );
                 language_scores.push(scores);
             }
         }
@@ -52,37 +137,113 @@ impl EncodingClass {
     }
 }
 
-static ENCODING_CLASSES: [EncodingClass; 1] = [EncodingClass {
-    char_classes: &VIETNAMESE,
-    encodings: &[&WINDOWS_1258_INIT],
-    languages: &["vi"],
-    name: "vietnamese",
-}];
+static ENCODING_CLASSES: [EncodingClass; 1] = [
+    EncodingClass {
+        char_classes: &CENTRAL,
+        encodings: &[&WINDOWS_1250_INIT],
+        languages: &["pl"],
+        name: "central",
+    },
+    EncodingClass {
+        char_classes: &CYRILLIC,
+        encodings: &[&WINDOWS_1251_INIT],
+        languages: &["ru"],
+        name: "vietnamese",
+    },
+    EncodingClass {
+        char_classes: &WESTERN,
+        encodings: &[&WINDOWS_1252_INIT],
+        languages: &["fi"],
+        name: "western",
+    },
+    EncodingClass {
+        char_classes: &GREEK,
+        encodings: &[&WINDOWS_1253_INIT],
+        languages: &["el"],
+        name: "greek",
+    },
+    EncodingClass {
+        char_classes: &TURKISH,
+        encodings: &[&WINDOWS_1254_INIT],
+        languages: &["vi"],
+        name: "turkish",
+    },
+    EncodingClass {
+        char_classes: &HEBREW,
+        encodings: &[&WINDOWS_1255_INIT],
+        languages: &["he"],
+        name: "hebrew",
+    },
+    EncodingClass {
+        char_classes: &ARABIC,
+        encodings: &[&WINDOWS_1256_INIT],
+        languages: &["ar"],
+        name: "arabic",
+    },
+    EncodingClass {
+        char_classes: &BALTIC,
+        encodings: &[&WINDOWS_1257_INIT],
+        languages: &["et"],
+        name: "baltic",
+    },
+    EncodingClass {
+        char_classes: &VIETNAMESE,
+        encodings: &[&WINDOWS_1258_INIT],
+        languages: &["vi"],
+        name: "vietnamese",
+    },
+    EncodingClass {
+        char_classes: &THAI,
+        encodings: &[&WINDOWS_874_INIT],
+        languages: &["th"],
+        name: "thai",
+    },
+];
+
+fn find_file(dir: &Path, lang: &str) -> PathBuf {
+    for entry in dir
+        .read_dir()
+        .expect("Reading the corpus directory failed.")
+    {
+        if let Ok(entry) = entry {
+            let name = entry.file_name();
+            if name.to_string_lossy().starts_with(lang) {
+                return entry.path();
+            }
+        }
+    }
+    eprintln!("Error: No corpus for: {}", lang);
+    std::process::exit(-4);
+}
 
 fn count_ascii_classes(char_classes: &'static [&'static [char]]) -> (usize, usize) {
-	let ascii_classes = char_classes.iter().map(|c| c[0]).take_while(|c| *c < '\u{80}').count();
-	if ascii_classes == 1 {
-		(0, char_classes.len())
-	} else {
-		(ascii_classes, char_classes.len() - ascii_classes)
-	}
+    let ascii_classes = char_classes
+        .iter()
+        .map(|c| c[0])
+        .take_while(|c| *c < '\u{80}')
+        .count();
+    if ascii_classes == 1 {
+        (0, char_classes.len())
+    } else {
+        (ascii_classes, char_classes.len() - ascii_classes)
+    }
 }
 
 fn open_bzip2(path: &Path) -> impl Iterator<Item = char> {
     let dec = BzDecoder::new(BufReader::new(File::open(path).unwrap()));
-    CodePoints::from(dec.bytes()).map(|r| r.unwrap())
+    UTF8Reader::new(BufReader::new(dec)).map(|r| r.unwrap()) //.take(50000) // XXX remove
 }
 
 fn merge(language_scores: Vec<Vec<f64>>) -> Vec<f64> {
-	let mut iter = language_scores.into_iter();
-	let mut ret = iter.next().unwrap();
-	for vec in iter {
-		assert_eq!(ret.len(), vec.len());
-		for (r, v) in ret.iter_mut().zip(vec.into_iter()) {
-			*r = f64::max(*r, v);
-		}
-	}
-	ret
+    let mut iter = language_scores.into_iter();
+    let mut ret = iter.next().unwrap();
+    for vec in iter {
+        assert_eq!(ret.len(), vec.len());
+        for (r, v) in ret.iter_mut().zip(vec.into_iter()) {
+            *r = f64::max(*r, v);
+        }
+    }
+    ret
 }
 
 fn divide_by_class_size(
@@ -116,21 +277,22 @@ fn compute_index(
     if x == 0 && y == 0 {
         return None;
     }
-    if ascii_classes == 0 {
-        return Some(x * y);
-    }
     if x < ascii_classes && y < ascii_classes {
         return None;
     }
     if y >= ascii_classes {
-        Some(x * y - ascii_classes * ascii_classes);
+        return Some(
+            (ascii_classes * non_ascii_classes)
+                + (ascii_classes + non_ascii_classes) * (y - ascii_classes)
+                + x,
+        );
     }
     Some(y * non_ascii_classes + x - ascii_classes)
 }
 
 fn compute_scores<I: Iterator<Item = char>>(
     iter: I,
-    classes: &HashMap<char, u8>,
+    classes: &CharMap,
     ascii_classes: usize,
     non_ascii_classes: usize,
 ) -> Vec<f64> {
@@ -149,7 +311,7 @@ fn compute_scores<I: Iterator<Item = char>>(
             // to `'a'` to be caught here.
             None
         } else {
-            Some(*classes.get(&c).unwrap_or(&0u8) as usize)
+            Some(classes.get(c) as usize)
         };
         if let (Some(prev_unwrap), Some(current_unwrap)) = (prev, current) {
             if let Some(index) = compute_index(
@@ -179,7 +341,7 @@ fn compute_scores<I: Iterator<Item = char>>(
 
 fn train_one(
     path: &Path,
-    classes: &HashMap<char, u8>,
+    classes: &CharMap,
     ascii_classes: usize,
     non_ascii_classes: usize,
     encoding: &'static Encoding,
@@ -190,7 +352,8 @@ fn train_one(
     if encoding == WINDOWS_1256 {
         // Map non-ASCII Latin to ASCII Latin
         compute_scores(
-            iter.flat_map(|c| c.to_lowercase()).nfc().map(|c| {
+            iter.nfc().map(|c| {
+                // XXX upper case
                 if ARABIC_FRENCH.iter().find(|&&x| x == c).is_some() {
                     'a'
                 } else {
@@ -204,68 +367,147 @@ fn train_one(
     } else if encoding == WINDOWS_1258 {
         // Decompose tones
         compute_scores(
-            iter.flat_map(|c| c.to_lowercase())
-                .nfc()
+            iter.nfc()
                 .decompose_vietnamese_tones(orthographic_vietnamese),
             classes,
             ascii_classes,
             non_ascii_classes,
         )
     } else if encoding == WINDOWS_1254 {
-        // Perform special I casing and map Azeri ə to ä.
+        // Map Azeri ə to ä.
         compute_scores(
-            iter.map(|c| if c == 'I' { 'ı' } else { c })
-                .flat_map(|c| c.to_lowercase())
-                .nfc()
-                .map(|c| if c == 'ə' { 'ä' } else { c }),
-            classes,
-            ascii_classes,
-            non_ascii_classes,
-        )
-    } else {
-        // Intentionally not handling final sigma to match
-        // detection-time mapping.
-        // Map Romanian comma-below characters to cedilla versions,
-        // because legacy encodings (other than ISO-8859-16, which we
-        // won't detect) only have the latter.
-        compute_scores(
-            iter.flat_map(|c| c.to_lowercase()).nfc().map(|c| {
-                if c == 'ț' {
-                    'ţ'
-                } else if c == 'ș' {
-                    'ş'
-                } else {
-                    c
-                }
+            iter.nfc().map(|c| match c {
+                'Ə' => 'Ä',
+                'ə' => 'ä',
+                _ => c,
             }),
             classes,
             ascii_classes,
             non_ascii_classes,
         )
+    } else if encoding == WINDOWS_1250 || encoding == ISO_8859_2 {
+        // Map Romanian comma-below characters to cedilla versions,
+        // because legacy encodings (other than ISO-8859-16, which we
+        // won't detect) only have the latter.
+        compute_scores(
+            iter.nfc().map(|c| match c {
+                'ț' => 'ţ',
+                'ș' => 'ş',
+                'Ț' => 'Ţ',
+                'Ș' => 'Ş',
+                _ => c,
+            }),
+            classes,
+            ascii_classes,
+            non_ascii_classes,
+        )
+    } else {
+        compute_scores(iter.nfc(), classes, ascii_classes, non_ascii_classes)
+    }
+}
+
+fn further_than_epsilon(a: u8, b: u8) -> bool {
+    true
+}
+
+fn suggest_merges(scores: &Vec<u8>, encoding_class: &'static EncodingClass) {
+    let (ascii_classes, non_ascii_classes) = count_ascii_classes(encoding_class.char_classes);
+    for i in 0..encoding_class.char_classes.len() {
+        'mid: for j in 0..i {
+            for k in 0..encoding_class.char_classes.len() {
+                let i_index_1 = compute_index(i, k, ascii_classes, non_ascii_classes);
+                let j_index_1 = compute_index(j, k, ascii_classes, non_ascii_classes);
+                if let (Some(i_index), Some(j_index)) = (i_index_1, j_index_1) {
+                    if further_than_epsilon(scores[i_index], scores[j_index]) {
+                        continue 'mid;
+                    }
+                }
+                let i_index_2 = compute_index(k, i, ascii_classes, non_ascii_classes);
+                let j_index_2 = compute_index(k, j, ascii_classes, non_ascii_classes);
+                if let (Some(i_index), Some(j_index)) = (i_index_2, j_index_2) {
+                    if further_than_epsilon(scores[i_index], scores[j_index]) {
+                        continue 'mid;
+                    }
+                }
+            }
+            // Suggest
+        }
+    }
+}
+
+fn train_with_dir(dir: &Path) {
+    let mut float_scores = Vec::with_capacity(ENCODING_CLASSES.len());
+    for class in ENCODING_CLASSES.iter() {
+        float_scores.push(class.train(dir));
+    }
+    let mut max = 0.0f64;
+    for (vec, _) in float_scores.iter() {
+        for &score in vec.iter() {
+            if score > max {
+                max = score;
+            }
+        }
+    }
+    let mut scores = Vec::with_capacity(float_scores.len());
+    for (vec, encoding_class) in float_scores {
+        let mut byte_vec = Vec::new();
+        byte_vec.resize(vec.len(), 0u8);
+        for (b, f) in byte_vec.iter_mut().zip(vec.into_iter()) {
+            *b = f64::floor((f / max) * 255.5) as u8;
+        }
+        scores.push((byte_vec, encoding_class));
+    }
+
+    for (byte_vec, encoding_class) in scores.iter() {
+        suggest_merges(&byte_vec, encoding_class);
     }
 }
 
 fn main() {
-	let mut float_scores = Vec::with_capacity(ENCODING_CLASSES.len());
-    for class in ENCODING_CLASSES.iter() {
-        float_scores.push(class.train());
+    let mut args = std::env::args_os();
+    if args.next().is_none() {
+        eprintln!("Error: Program name missing from arguments.");
+        std::process::exit(-1);
     }
-    let mut max = 0.0f64;
-    for (vec, _) in float_scores.iter() {
-    	for &score in vec.iter() {
-    		if score > max {
-    			max = score;
-    		}
-    	}
+    if let Some(path) = args.next() {
+        if args.next().is_some() {
+            eprintln!("Error: Too many arguments.");
+            std::process::exit(-3);
+        }
+        train_with_dir(Path::new(&path));
+    } else {
+        eprintln!("Error: Too few arguments.");
+        std::process::exit(-2);
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compute_index;
+    #[test]
+    fn test_compute_index() {
+        //    0  1  2  3  4
+        //  +--+--+--+--+--+
+        // 0|  |  | 0| 1| 2|
+        //  +--+--+--+--+--+
+        // 1|  |  | 3| 4| 5|
+        //  +--+--+--+--+--+
+        // 2| 6| 7| 8| 9|10|
+        //  +--+--+--+--+--+
+        // 3|11|12|13|14|15|
+        //  +--+--+--+--+--+
+        // 4|16|17|18|19|20|
+        //  +--+--+--+--+--+
+        assert_eq!(compute_index(1, 1, 2, 3), None);
+        assert_eq!(compute_index(2, 0, 2, 3), Some(0));
+        assert_eq!(compute_index(4, 0, 2, 3), Some(2));
+        assert_eq!(compute_index(2, 1, 2, 3), Some(3));
+        assert_eq!(compute_index(4, 1, 2, 3), Some(5));
+        assert_eq!(compute_index(0, 2, 2, 3), Some(6));
+        assert_eq!(compute_index(4, 2, 2, 3), Some(10));
+        assert_eq!(compute_index(0, 3, 2, 3), Some(11));
+        assert_eq!(compute_index(4, 3, 2, 3), Some(15));
+        assert_eq!(compute_index(0, 4, 2, 3), Some(16));
+        assert_eq!(compute_index(4, 4, 2, 3), Some(20));
     }
-    let mut scores = Vec::with_capacity(float_scores.len());
-    for (vec, encoding_class) in float_scores {
-    	let mut byte_vec = Vec::new();
-    	byte_vec.resize(vec.len(), 0u8);
-    	for (b, f) in byte_vec.iter_mut().zip(vec.into_iter()) {
-    		*b = f64::floor((f / max) * 255.5) as u8;
-    	}
-    	scores.push((byte_vec, encoding_class));
-    }
-    
 }
