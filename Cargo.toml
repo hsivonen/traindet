@@ -11,4 +11,4 @@ encoding_rs = "0.8.17"
 unic-normal = "0.9.0"
 detone = "1.0.0"
 detector_char_classes = { path = "../detector_char_classes" }
-utf8reader = "0.1.0"
+rayon = "1.0.3"
