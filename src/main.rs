@@ -43,12 +43,12 @@ use unic_normal::StrNormalForm;
 use unicode_reader::CodePoints;
 
 struct CharMap {
-    arr: [u8; 3674],
+    arr: [u8; 8206],
 }
 
 impl CharMap {
     fn new(char_classes: &'static [&'static [char]], windows_encoding: &'static Encoding) -> Self {
-        let mut ret = CharMap { arr: [0u8; 3674] };
+        let mut ret = CharMap { arr: [0u8; 8206] };
         for (i, chars) in char_classes.iter().enumerate() {
             let class = i as u8;
             for &c in chars.iter() {
@@ -102,6 +102,8 @@ struct EncodingClass {
     encodings: &'static [&'static Encoding],
     languages: &'static [&'static str],
     name: &'static str,
+    space_divisor: f64,
+    multiplier: f64,
 }
 
 impl EncodingClass {
@@ -131,6 +133,8 @@ impl EncodingClass {
                     self.char_classes,
                     ascii_classes,
                     non_ascii_classes,
+                    windows_encoding,
+                    self.space_divisor,
                 );
 
                 let mut max = 0.0f64;
@@ -158,6 +162,8 @@ impl EncodingClass {
                         self.char_classes,
                         ascii_classes,
                         non_ascii_classes,
+                        windows_encoding,
+                        self.space_divisor,
                     );
 
                     let mut max = 0.0f64;
@@ -188,12 +194,16 @@ static ENCODING_CLASSES: [EncodingClass; 10] = [
         encodings: &[&WINDOWS_1258_INIT],
         languages: &["vi"],
         name: "vietnamese",
+        space_divisor: 10.0,
+        multiplier: 1.0,
     },
     EncodingClass {
         char_classes: &CENTRAL,
         encodings: &[&WINDOWS_1250_INIT, &ISO_8859_2_INIT],
         languages: &["pl", "hu", "sh", "cs", "ro", "sk", "hr", "sl", "bs", "sq"],
         name: "central",
+        space_divisor: 10.0,
+        multiplier: 1.0,
     },
     EncodingClass {
         char_classes: &CYRILLIC,
@@ -208,6 +218,8 @@ static ENCODING_CLASSES: [EncodingClass; 10] = [
         // mn uses mapping to uk letters
         languages: &["ru", "uk", "sr", "bg", "ce", "be", "mk", "mn"],
         name: "cyrillic",
+        space_divisor: 5.0,
+        multiplier: 1.0,
     },
     EncodingClass {
         char_classes: &WESTERN,
@@ -219,42 +231,56 @@ static ENCODING_CLASSES: [EncodingClass; 10] = [
             "oc", "br", "lb", "ht", "ga", "is", "an", "wa", "gd", "fo", "li",
         ],
         name: "western",
+        space_divisor: 10.0,
+        multiplier: 1.0,
     },
     EncodingClass {
         char_classes: &GREEK,
         encodings: &[&WINDOWS_1253_INIT, &ISO_8859_7_INIT],
         languages: &["el"],
         name: "greek",
+        space_divisor: 3.0,
+        multiplier: 1.0,
     },
     EncodingClass {
         char_classes: &TURKISH,
         encodings: &[&WINDOWS_1254_INIT],
         languages: &["tr", "az", "ku"],
         name: "turkish",
+        space_divisor: 10.0,
+        multiplier: 1.0,
     },
     EncodingClass {
         char_classes: &HEBREW,
         encodings: &[&WINDOWS_1255_INIT, &ISO_8859_8_INIT],
         languages: &["he", "yi"],
         name: "hebrew",
+        space_divisor: 6.0,
+        multiplier: 1.0,
     },
     EncodingClass {
         char_classes: &ARABIC,
         encodings: &[&WINDOWS_1256_INIT, &ISO_8859_6_INIT],
         languages: &["ar", "fa", "ur"],
         name: "arabic",
+        space_divisor: 8.0,
+        multiplier: 1.0,
     },
     EncodingClass {
         char_classes: &BALTIC,
         encodings: &[&WINDOWS_1257_INIT, &ISO_8859_4_INIT],
         languages: &["lt", "et", "lv"],
         name: "baltic",
+        space_divisor: 10.0,
+        multiplier: 1.0,
     },
     EncodingClass {
         char_classes: &THAI,
         encodings: &[&WINDOWS_874_INIT],
         languages: &["th"],
         name: "thai",
+        space_divisor: 10.0,
+        multiplier: 1.0,
     },
 ];
 
@@ -285,9 +311,8 @@ fn count_ascii_classes(char_classes: &'static [&'static [char]]) -> (usize, usiz
 
 fn open_bzip2(path: &Path) -> impl Iterator<Item = char> {
     let dec = BzDecoder::new(BufReader::new(File::open(path).unwrap()));
-    CodePoints::from(BufReader::new(dec))
-        .map(|r| r.unwrap())
-        .take(50000) // XXX remove
+    CodePoints::from(BufReader::new(dec)).map(|r| r.unwrap())
+    // .take(50000) // XXX remove
 }
 
 fn merge(language_scores: Vec<Vec<f64>>) -> Vec<f64> {
@@ -307,17 +332,27 @@ fn divide_by_class_size(
     classes: &'static [&'static [char]],
     ascii_classes: usize,
     non_ascii_classes: usize,
+    windows_encoding: &'static Encoding,
+    space_divisor: f64,
 ) {
     for (i, size) in classes.iter().map(|c| c.len()).enumerate() {
-        if size > 1 {
-            let divisor = size as f64;
-            for j in 0..classes.len() {
-                if let Some(index) = compute_index(i, j, ascii_classes, non_ascii_classes) {
-                    scores[index] /= divisor;
-                }
-                if let Some(index) = compute_index(j, i, ascii_classes, non_ascii_classes) {
-                    scores[index] /= divisor;
-                }
+        let divisor = if i == 1 && windows_encoding == WINDOWS_1255 {
+            // Don't divide Hebrew ASCII punctuation class
+            continue;
+        } else if i == 0 {
+            space_divisor
+        } else {
+            if size == 1 {
+                continue;
+            }
+            size as f64
+        };
+        for j in 0..classes.len() {
+            if let Some(index) = compute_index(i, j, ascii_classes, non_ascii_classes) {
+                scores[index] /= divisor;
+            }
+            if let Some(index) = compute_index(j, i, ascii_classes, non_ascii_classes) {
+                scores[index] /= divisor;
             }
         }
     }
@@ -375,8 +410,14 @@ fn compute_scores<I: Iterator<Item = char>>(
     let mut float_scores = Vec::with_capacity(score_len);
     let float_total = total as f64;
     for score in scores {
-        let float_score = score as f64;
-        float_scores.push(float_score / float_total);
+        if score == 0 {
+            // No instances of this character pair.
+            // Mark as implausible.
+            float_scores.push(std::f64::NAN);
+        } else {
+            let float_score = score as f64;
+            float_scores.push(float_score / float_total);
+        }
     }
 
     float_scores
@@ -533,8 +574,12 @@ fn train_with_dir(dir: &Path, rs: &Path) {
         let mut byte_vec = Vec::new();
         byte_vec.resize(vec.len(), 0u8);
         for (b, f) in byte_vec.iter_mut().zip(vec.into_iter()) {
-            let s = f64::floor((f / max) * 255.5) as u64;
-            *b = if s > 255 { 255 } else { s as u8 };
+            if f.is_nan() {
+                *b = 255;
+            } else {
+                let s = f64::floor((f / max) * 254.5) as u64;
+                *b = if s > 254 { 254 } else { s as u8 };
+            }
         }
         scores.push((byte_vec, *encoding_class));
     }
@@ -554,7 +599,11 @@ fn train_with_dir(dir: &Path, rs: &Path) {
         println!(
             "MAX byte {}: {:?}",
             encoding_class.name,
-            byte_vec.iter().max()
+            byte_vec
+                .iter()
+                .map(|x| if *x == 255 { 0 } else { *x })
+                .max()
+                .unwrap()
         );
     }
 
@@ -596,6 +645,9 @@ fn generate_ascii_table(
                 // Intentionally not handling final sigma to match
                 // detection-time mapping.
                 continue;
+            } else if !c.is_lowercase() {
+                // caseless
+                continue;
             } else {
                 let mut iter = c.to_uppercase();
                 let first = iter.next().unwrap();
@@ -605,7 +657,7 @@ fn generate_ascii_table(
                 first
             };
             if (upper as usize) < vec.len() {
-                vec[upper as usize] = class;
+                vec[upper as usize] = class | 0x80;
             }
         }
     }
@@ -633,6 +685,16 @@ fn generate_upper_table(
                     vec[i] = 255;
                     continue 'outer;
                 }
+                if encoding == WINDOWS_1256 {
+                    if let Some(c) = ARABIC_FRENCH.iter().find(|&&x| x == u) {
+                        if c.is_uppercase() {
+                            vec[i] = 0xFE;
+                        } else {
+                            vec[i] = 0x7E;
+                        }
+                        continue 'outer;
+                    }
+                }
                 for (j, chars) in char_classes.iter().enumerate() {
                     let class = j as u8;
                     for &c in chars.iter() {
@@ -646,6 +708,9 @@ fn generate_upper_table(
                             // Intentionally not handling final sigma to match
                             // detection-time mapping.
                             continue;
+                        } else if !c.is_lowercase() {
+                            // caseless
+                            continue;
                         } else {
                             let mut iter = c.to_uppercase();
                             let first = iter.next().unwrap();
@@ -655,7 +720,7 @@ fn generate_upper_table(
                             first
                         };
                         if upper == u {
-                            vec[i] = class;
+                            vec[i] = class | 0x80;
                             continue 'outer;
                         }
                     }
@@ -670,14 +735,21 @@ fn generate_upper_table(
     vec
 }
 
+fn mark_ascii_letters_as_non_pairing(vec: &mut Vec<u8>) {
+    assert_eq!(vec.len(), 128);
+    for i in 0..128 {
+        if i >= b'a' && i <= b'z' {
+            vec[i as usize] = 0x7E;
+        } else if i >= b'A' && i <= b'Z' {
+            vec[i as usize] = 0xFE;
+        }
+    }
+}
+
 fn generate_non_latin_ascii_table() -> Vec<u8> {
     let mut vec = Vec::new();
     vec.resize(128, 0u8);
-    for i in 0..128 {
-        if (i >= b'a' && i <= b'z') || (i >= b'A' && i <= b'Z') {
-            vec[i as usize] = 254;
-        }
-    }
+    mark_ascii_letters_as_non_pairing(&mut vec);
     vec
 }
 
@@ -712,6 +784,8 @@ use encoding_rs::ISO_8859_6_INIT;
 use encoding_rs::WINDOWS_1257_INIT;
 use encoding_rs::ISO_8859_4_INIT;
 use encoding_rs::WINDOWS_874_INIT;
+use super::LATIN_ADJACENCY_PENALTY;
+use super::IMPLAUSIBILITY_PENALTY;
 
 ",
         )
@@ -801,8 +875,10 @@ use encoding_rs::WINDOWS_874_INIT;
 
     writer.write_all(b"    hebrew_ascii: [\n").unwrap();
 
-    // TODO FIXME
-    write_class_mapping_table(&mut writer, &generate_non_latin_ascii_table());
+    let hebrew = encoding_class_by_encoding(WINDOWS_1255);
+    let mut hebrew_ascii = generate_ascii_table(hebrew.char_classes, hebrew.encodings[0]);
+    mark_ascii_letters_as_non_pairing(&mut hebrew_ascii);
+    write_class_mapping_table(&mut writer, &hebrew_ascii);
 
     writer.write_all(b"    ],\n").unwrap();
 
@@ -904,7 +980,6 @@ pub struct SingleByteData {
     probabilities: &'static [u8],
     ascii: usize,
     non_ascii: usize,
-    swap: bool,
 }
 
 impl SingleByteData {
@@ -920,16 +995,23 @@ impl SingleByteData {
     }
 
     #[inline(always)]
-    pub fn score(&'static self, current_class: u8, previous_class: u8) -> u64 {
-        let (c, p) = if self.swap {
-            (previous_class, current_class)
-        } else {
-            (current_class, previous_class)
-        };
-        if let Some(index) =
-            compute_index(usize::from(p), usize::from(c), self.ascii, self.non_ascii)
+    pub fn score(&'static self, current_class: u8, previous_class: u8) -> i64 {
+        if ((current_class == 0x7E) ^ (previous_class == 0x7E))
+            && !((current_class as usize) < self.ascii || (previous_class as usize) < self.ascii)
         {
-            u64::from(self.probabilities[index])
+            LATIN_ADJACENCY_PENALTY
+        } else if let Some(index) = compute_index(
+            usize::from(previous_class),
+            usize::from(current_class),
+            self.ascii,
+            self.non_ascii,
+        ) {
+            let b = self.probabilities[index];
+            if b == 255 {
+                IMPLAUSIBILITY_PENALTY
+            } else {
+                i64::from(b)
+            }
         } else {
             0
         }
@@ -973,7 +1055,6 @@ impl SingleByteData {
         probabilities: &DETECTOR_DATA.{},
         ascii: {}_ASCII,
         non_ascii: {}_NON_ASCII,
-        swap: {},
     }},\n",
                     encoding_upper,
                     lower,
@@ -981,7 +1062,6 @@ impl SingleByteData {
                     encoding_class.name,
                     class_upper,
                     class_upper,
-                    encoding == &ISO_8859_8
                 ))
                 .unwrap();
         }
