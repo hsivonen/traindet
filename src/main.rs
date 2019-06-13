@@ -52,6 +52,7 @@ use unic_normal::StrNormalForm;
 use unicode_reader::CodePoints;
 
 struct CharMap {
+    // The highest is ZERO WIDTH JOINER (LRM and RLM are treated as space-like)
     arr: [u8; 8206],
 }
 
