@@ -117,27 +117,57 @@ struct EncodingClass {
 }
 
 impl EncodingClass {
-    fn train(&'static self, dir: &Path) -> (Vec<f64>, &'static Self) {
+    fn count(&'static self, dir: &Path) {
         let windows_encoding = self.encodings[0];
 
         let map = CharMap::new(self.char_classes, windows_encoding);
 
         let (ascii_classes, non_ascii_classes) = count_ascii_classes(self.char_classes);
 
-        let language_scores = self
-            .languages
-            .par_iter()
-            .map(|lang| {
-                eprintln!("Training {:?}", lang);
+        self.languages.par_iter().for_each(|lang| {
+            eprintln!("Counting {:?}", lang);
+            let corpus = find_file(dir, lang);
+            let scores = count_one(
+                &corpus,
+                &map,
+                ascii_classes,
+                non_ascii_classes,
+                windows_encoding,
+                false,
+            );
+            let path = gen_count_path(dir, lang, false);
+            write_scores(&path, &scores);
+
+            if windows_encoding == WINDOWS_1258 {
                 let corpus = find_file(dir, lang);
-                let mut scores = train_one(
+                let scores = count_one(
                     &corpus,
                     &map,
                     ascii_classes,
                     non_ascii_classes,
                     windows_encoding,
-                    false,
+                    true,
                 );
+                let path = gen_count_path(dir, lang, true);
+                write_scores(&path, &scores);
+            }
+        });
+    }
+
+    fn train(&'static self, dir: &Path) -> (Vec<f64>, &'static Self) {
+        let windows_encoding = self.encodings[0];
+
+        // let map = CharMap::new(self.char_classes, windows_encoding);
+
+        let (ascii_classes, non_ascii_classes) = count_ascii_classes(self.char_classes);
+
+        let language_scores = self
+            .languages
+            .iter()
+            .map(|lang| {
+                eprintln!("Training {:?}", lang);
+                let count_path = gen_count_path(dir, lang, false);
+                let mut scores = load_one(&count_path);
                 divide_by_class_size(
                     &mut scores,
                     self.char_classes,
@@ -159,14 +189,8 @@ impl EncodingClass {
                 if windows_encoding == WINDOWS_1258 {
                     let mut vietnamese_scores = Vec::new();
                     vietnamese_scores.push(scores);
-                    let mut scores = train_one(
-                        &corpus,
-                        &map,
-                        ascii_classes,
-                        non_ascii_classes,
-                        windows_encoding,
-                        true,
-                    );
+                    let count_path = gen_count_path(dir, lang, true);
+                    let mut scores = load_one(&count_path);
                     divide_by_class_size(
                         &mut scores,
                         self.char_classes,
@@ -235,10 +259,9 @@ static ENCODING_CLASSES: [EncodingClass; 10] = [
         char_classes: &WESTERN,
         encodings: &[&WINDOWS_1252_INIT],
         // Intentionally omitting ASCII languages like en, nl, id, so, sw, various Malay-alphabet languages
-        // Should et and sq be also here?
         languages: &[
-            "sv", "de", "fr", "it", "es", "pt", "ca", "no", "fi", "eu", "da", "et", "gl", "nn",
-            "oc", "br", "lb", "ht", "ga", "is", "an", "wa", "gd", "fo", "li",
+            "sv", "de", "fr", "it", "es", "pt", "ca", "no", "fi", "eu", "da", "gl", "nn", "oc",
+            "br", "lb", "ht", "ga", "is", "an", "wa", "gd", "fo", "li",
         ],
         name: "western",
         space_divisor: 10.0,
@@ -294,6 +317,28 @@ static ENCODING_CLASSES: [EncodingClass; 10] = [
     },
 ];
 
+fn write_scores(path: &Path, scores: &[u64]) {
+    let bytes = {
+        // Actually safe, since all bit patterns are valid values
+        // for u8 and u64.
+        let (head, bytes, tail) = unsafe { scores.align_to::<u8>() };
+        assert_eq!(head.len(), 0);
+        assert_eq!(tail.len(), 0);
+        bytes
+    };
+
+    let file = File::create(path).expect("Unable to create output file.");
+    let mut writer = BufWriter::new(file);
+    writer.write_all(bytes).unwrap();
+}
+
+fn gen_count_path(dir: &Path, lang: &str, bis: bool) -> PathBuf {
+    let suffix = if bis { "_bis.counts" } else { ".counts" };
+    let mut file_name = String::from(lang);
+    file_name.push_str(suffix);
+    dir.join(file_name)
+}
+
 fn find_file(dir: &Path, lang: &str) -> PathBuf {
     for entry in dir
         .read_dir()
@@ -301,7 +346,8 @@ fn find_file(dir: &Path, lang: &str) -> PathBuf {
     {
         if let Ok(entry) = entry {
             let name = entry.file_name();
-            if name.to_string_lossy().starts_with(lang) {
+            let s = name.to_string_lossy();
+            if s.starts_with(lang) && s.ends_with(".bz2") {
                 return entry.path();
             }
         }
@@ -399,12 +445,10 @@ fn compute_scores<I: Iterator<Item = char>>(
     classes: &CharMap,
     ascii_classes: usize,
     non_ascii_classes: usize,
-) -> Vec<f64> {
+) -> Vec<u64> {
     let score_len = non_ascii_classes * non_ascii_classes + 2 * (ascii_classes * non_ascii_classes);
     let mut scores = Vec::new();
     scores.resize(score_len, 0u64);
-
-    let mut total = 0u64;
 
     let mut prev = 0usize;
 
@@ -412,14 +456,19 @@ fn compute_scores<I: Iterator<Item = char>>(
         let current = classes.get(c) as usize;
         if let Some(index) = compute_index(prev, current, ascii_classes, non_ascii_classes) {
             scores[index] += 1;
-            total += 1;
         }
         prev = current;
     }
 
-    let mut float_scores = Vec::with_capacity(score_len);
+    scores
+}
+
+fn convert_to_floats(scores: &[u64]) -> Vec<f64> {
+    let total: u64 = scores.iter().sum();
+
+    let mut float_scores = Vec::with_capacity(scores.len());
     let float_total = total as f64;
-    for score in scores {
+    for &score in scores {
         if score == 0 {
             // No instances of this character pair.
             // Mark as implausible.
@@ -433,14 +482,35 @@ fn compute_scores<I: Iterator<Item = char>>(
     float_scores
 }
 
-fn train_one(
+fn load_u64(path: &Path) -> Vec<u64> {
+    let bytes = std::fs::read(path).expect("Could not read counts");
+    assert_eq!(bytes.len() % std::mem::size_of::<u64>(), 0);
+    let mut ret = Vec::new();
+    ret.resize(bytes.len() / std::mem::size_of::<u64>(), 0);
+    // Actually safe, since all bit patterns are valid values
+    // for u8 and u64.
+    let (head, target, tail) = unsafe { ret.align_to_mut::<u8>() };
+    assert_eq!(head.len(), 0);
+    assert_eq!(tail.len(), 0);
+
+    target.copy_from_slice(&bytes);
+
+    ret
+}
+
+fn load_one(path: &Path) -> Vec<f64> {
+    let scores = load_u64(path);
+    convert_to_floats(&scores)
+}
+
+fn count_one(
     path: &Path,
     classes: &CharMap,
     ascii_classes: usize,
     non_ascii_classes: usize,
     encoding: &'static Encoding,
     orthographic_vietnamese: bool,
-) -> Vec<f64> {
+) -> Vec<u64> {
     let iter = open_bzip2(path);
 
     if encoding == WINDOWS_1256 {
@@ -561,7 +631,7 @@ fn suggest_merges(scores: &Vec<u8>, encoding_class: &'static EncodingClass) {
 
 fn train_with_dir(dir: &Path, rs: &Path) {
     let float_scores = ENCODING_CLASSES
-        .par_iter()
+        .iter()
         .map(|c| c.train(dir))
         .collect::<Vec<(Vec<f64>, &'static EncodingClass)>>();
     // let mut max = 0.0f64;
@@ -1180,25 +1250,51 @@ fn download_corpus(dir: &Path) {
     curl.output().expect("Executing curl failed");
 }
 
+fn count_pairs(dir: &Path) {
+    ENCODING_CLASSES.par_iter().for_each(|c| c.count(dir));
+}
+
 fn main() {
     let mut args = std::env::args_os();
     if args.next().is_none() {
         eprintln!("Error: Program name missing from arguments.");
         std::process::exit(-1);
     }
-    if let Some(path) = args.next() {
-        if let Some(second) = args.next() {
-            if "--download" == second {
+    if let Some(command) = args.next() {
+        if "download" == command {
+            if let Some(path) = args.next() {
                 download_corpus(Path::new(&path));
             } else {
-                train_with_dir(Path::new(&path), Path::new(&second));
+                eprintln!("Error: Download directory missing.");
+                std::process::exit(-3);
             }
+        } else if "count" == command {
+            if let Some(path) = args.next() {
+                count_pairs(Path::new(&path));
+            } else {
+                eprintln!("Error: Download directory missing.");
+                std::process::exit(-3);
+            }
+        } else if "generate" == command {
+            if let Some(dir) = args.next() {
+                if let Some(rs) = args.next() {
+                    train_with_dir(Path::new(&dir), Path::new(&rs));
+                } else {
+                    eprintln!("Error: Target Rust file missing.");
+                    std::process::exit(-3);
+                }
+            } else {
+                eprintln!("Error: Download directory missing.");
+                std::process::exit(-3);
+            }
+        } else if "titles" == command {
+            unimplemented!("Title download not implemented.");
         } else {
-            eprintln!("Error: Too few arguments.");
-            std::process::exit(-2);
+            eprintln!("Error: Unknown command.");
+            std::process::exit(-3);
         }
     } else {
-        eprintln!("Error: Too few arguments.");
+        eprintln!("Error: Command missing.");
         std::process::exit(-2);
     };
 }
