@@ -177,6 +177,25 @@ impl EncodingClass {
                     self.space_divisor,
                 );
 
+                if windows_encoding == WINDOWS_1256 {
+                    // Some letter pairs in Arabic get such high
+                    // scores that it the corresponding byte pairs
+                    // occur in a short string, pretty much anything
+                    // gets classified as Arabic. Since in practice,
+                    // single-byte Arabic encodings on the Web are
+                    // rare, this intervention makes the detector
+                    // less eager to decide Arabic.
+                    clamp(
+                        &mut scores,
+                        self.char_classes,
+                        ascii_classes,
+                        non_ascii_classes,
+                        windows_encoding,
+                        'ا',
+                        'ئ',
+                    );
+                }
+
                 let mut max = 0.0f64;
                 for &score in scores.iter() {
                     if score > max {
@@ -381,6 +400,31 @@ fn merge(language_scores: Vec<Vec<f64>>) -> Vec<f64> {
         }
     }
     ret
+}
+
+fn clamp(
+    scores: &mut Vec<f64>,
+    classes: &'static [&'static [char]],
+    ascii_classes: usize,
+    non_ascii_classes: usize,
+    windows_encoding: &'static Encoding,
+    first_reference: char,
+    second_reference: char,
+) {
+    let map = CharMap::new(classes, windows_encoding);
+    let index = compute_index(
+        map.get(first_reference) as usize,
+        map.get(second_reference) as usize,
+        ascii_classes,
+        non_ascii_classes,
+    )
+    .unwrap();
+    let cutoff = scores[index];
+    for score in scores.iter_mut() {
+        if *score > cutoff {
+            *score = cutoff;
+        }
+    }
 }
 
 fn divide_by_class_size(
