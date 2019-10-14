@@ -39,6 +39,7 @@ use encoding_rs::WINDOWS_1256_INIT;
 use encoding_rs::WINDOWS_1257_INIT;
 use encoding_rs::WINDOWS_1258;
 use encoding_rs::WINDOWS_1258_INIT;
+use encoding_rs::WINDOWS_874;
 use encoding_rs::WINDOWS_874_INIT;
 use rayon::prelude::*;
 use std::fs::File;
@@ -176,6 +177,14 @@ impl EncodingClass {
                     windows_encoding,
                     self.space_divisor,
                 );
+
+                if windows_encoding == WINDOWS_874 {
+                    multiply(&mut scores, 20.5);
+                }
+
+                if windows_encoding == WINDOWS_1255 {
+                    multiply(&mut scores, 2.0);
+                }
 
                 if windows_encoding == WINDOWS_1256 {
                     // Some letter pairs in Arabic get such high
@@ -400,6 +409,12 @@ fn merge(language_scores: Vec<Vec<f64>>) -> Vec<f64> {
         }
     }
     ret
+}
+
+fn multiply(scores: &mut Vec<f64>, factor: f64) {
+    for score in scores.iter_mut() {
+        *score *= factor;
+    }
 }
 
 fn clamp(
@@ -1282,6 +1297,7 @@ fn download_corpus(dir: &Path) {
     let date = "20190420";
     let mut curl = Command::new("curl");
     curl.current_dir(dir);
+    curl.arg("-L");
     curl.arg("--remote-name-all");
     for encoding_class in ENCODING_CLASSES.iter() {
         for lang in encoding_class.languages.iter() {
@@ -1338,8 +1354,6 @@ fn main() {
                 eprintln!("Error: Download directory missing.");
                 std::process::exit(-3);
             }
-        } else if "titles" == command {
-            unimplemented!("Title download not implemented.");
         } else {
             eprintln!("Error: Unknown command.");
             std::process::exit(-3);
