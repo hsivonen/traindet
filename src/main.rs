@@ -1227,7 +1227,7 @@ impl SingleByteData {
     }
 }
 
-fn write_byte(writer: &mut Write, byte: u8) {
+fn write_byte(writer: &mut dyn Write, byte: u8) {
     if byte < 10 {
         writer.write_fmt(format_args!("  {},", byte)).unwrap();
     } else if byte < 100 {
@@ -1237,7 +1237,7 @@ fn write_byte(writer: &mut Write, byte: u8) {
     }
 }
 
-fn write_class_mapping_table(writer: &mut Write, table: &[u8]) {
+fn write_class_mapping_table(writer: &mut dyn Write, table: &[u8]) {
     assert_eq!(table.len(), 128);
     for i in 0..8 {
         writer.write_all(b"        ").unwrap();
@@ -1250,7 +1250,7 @@ fn write_class_mapping_table(writer: &mut Write, table: &[u8]) {
 }
 
 fn write_probability_table(
-    writer: &mut Write,
+    writer: &mut dyn Write,
     table: &[u8],
     ascii: usize,
     non_ascii: usize,
