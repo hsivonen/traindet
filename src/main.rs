@@ -53,13 +53,13 @@ use unic_normal::StrNormalForm;
 use unicode_reader::CodePoints;
 
 struct CharMap {
-    // The highest is ZERO WIDTH JOINER (LRM and RLM are treated as space-like)
-    arr: [u8; 8206],
+    // The highest is NUMERO SIGN (LRM and RLM are treated as space-like)
+    arr: [u8; 8471],
 }
 
 impl CharMap {
     fn new(char_classes: &'static [&'static [char]], windows_encoding: &'static Encoding) -> Self {
-        let mut ret = CharMap { arr: [0u8; 8206] };
+        let mut ret = CharMap { arr: [0u8; 8471] };
         for (i, chars) in char_classes.iter().enumerate() {
             let class = i as u8;
             for &c in chars.iter() {
@@ -82,19 +82,19 @@ impl CharMap {
                 ret.arr[upper as usize] = class;
             }
         }
-        if !is_latin(windows_encoding) {
-            for c in b'a'..=b'z' {
-                ret.arr[c as usize] = 0xFE;
-            }
-            for c in b'A'..=b'Z' {
-                ret.arr[c as usize] = 0xFE;
-            }
-            if windows_encoding == WINDOWS_1256 {
-                for &c in ARABIC_FRENCH.iter() {
-                    ret.arr[c as usize] = 0xFE;
-                }
-            }
-        }
+        // if !is_latin(windows_encoding) {
+        //     for c in b'a'..=b'z' {
+        //         ret.arr[c as usize] = 0xFE;
+        //     }
+        //     for c in b'A'..=b'Z' {
+        //         ret.arr[c as usize] = 0xFE;
+        //     }
+        //     if windows_encoding == WINDOWS_1256 {
+        //         for &c in ARABIC_FRENCH.iter() {
+        //             ret.arr[c as usize] = 0xFE;
+        //         }
+        //     }
+        // }
         ret
     }
 
@@ -572,22 +572,24 @@ fn count_one(
 ) -> Vec<u64> {
     let iter = open_bzip2(path);
 
-    if encoding == WINDOWS_1256 {
-        // Map non-ASCII Latin to ASCII Latin
-        compute_scores(
-            iter.nfc().map(|c| {
-                // XXX upper case
-                if ARABIC_FRENCH.iter().find(|&&x| x == c).is_some() {
-                    'a'
-                } else {
-                    c
-                }
-            }),
-            classes,
-            ascii_classes,
-            non_ascii_classes,
-        )
-    } else if encoding == WINDOWS_1258 {
+    // if encoding == WINDOWS_1256 {
+    //     // Map non-ASCII Latin to ASCII Latin
+    //     compute_scores(
+    //         iter.nfc().map(|c| {
+    //             // XXX upper case
+    //             if ARABIC_FRENCH.iter().find(|&&x| x == c).is_some() {
+    //                 'a'
+    //             } else {
+    //                 c
+    //             }
+    //             c
+    //         }),
+    //         classes,
+    //         ascii_classes,
+    //         non_ascii_classes,
+    //     )
+    // } else
+    if encoding == WINDOWS_1258 {
         // Decompose tones
         compute_scores(
             iter.nfc()
@@ -824,16 +826,16 @@ fn generate_upper_table(
                     vec[i] = 255;
                     continue 'outer;
                 }
-                if encoding == WINDOWS_1256 {
-                    if let Some(c) = ARABIC_FRENCH.iter().find(|&&x| x == u) {
-                        if c.is_uppercase() {
-                            vec[i] = 0xFE;
-                        } else {
-                            vec[i] = 0x7E;
-                        }
-                        continue 'outer;
-                    }
-                }
+                // if encoding == WINDOWS_1256 {
+                //     if let Some(c) = ARABIC_FRENCH.iter().find(|&&x| x == u) {
+                //         if c.is_uppercase() {
+                //             vec[i] = 0xFE;
+                //         } else {
+                //             vec[i] = 0x7E;
+                //         }
+                //         continue 'outer;
+                //     }
+                // }
                 for (j, chars) in char_classes.iter().enumerate() {
                     let class = j as u8;
                     for &c in chars.iter() {
