@@ -53,13 +53,13 @@ use unic_normal::StrNormalForm;
 use unicode_reader::CodePoints;
 
 struct CharMap {
-    // The highest is NUMERO SIGN (LRM and RLM are treated as space-like)
-    arr: [u8; 8471],
+    // Highest is U+25A0 BLACK SQUARE
+    arr: [u8; 9633],
 }
 
 impl CharMap {
     fn new(char_classes: &'static [&'static [char]], windows_encoding: &'static Encoding) -> Self {
-        let mut ret = CharMap { arr: [0u8; 8471] };
+        let mut ret = CharMap { arr: [0u8; 9633] };
         for (i, chars) in char_classes.iter().enumerate() {
             let class = i as u8;
             for &c in chars.iter() {
@@ -178,13 +178,7 @@ impl EncodingClass {
                     self.space_divisor,
                 );
 
-                if windows_encoding == WINDOWS_874 {
-                    multiply(&mut scores, 20.5);
-                }
-
-                if windows_encoding == WINDOWS_1255 {
-                    multiply(&mut scores, 2.0);
-                }
+                multiply(&mut scores, self.multiplier);
 
                 if windows_encoding == WINDOWS_1256 {
                     // Some letter pairs in Arabic get such high
@@ -286,7 +280,7 @@ static ENCODING_CLASSES: [EncodingClass; 10] = [
     EncodingClass {
         char_classes: &WESTERN,
         encodings: &[&WINDOWS_1252_INIT],
-        // Intentionally omitting ASCII languages like en, nl, id, so, sw, various Malay-alphabet languages
+        // Intentionally omitting ASCII or almost-ASCII languages like en, nl, id, so, sw, various Malay-alphabet languages
         languages: &[
             "sv", "de", "fr", "it", "es", "pt", "ca", "no", "fi", "eu", "da", "gl", "nn", "oc",
             "br", "lb", "ht", "ga", "is", "an", "wa", "gd", "fo", "li",
@@ -301,7 +295,7 @@ static ENCODING_CLASSES: [EncodingClass; 10] = [
         languages: &["el"],
         name: "greek",
         space_divisor: 3.0,
-        multiplier: 1.0,
+        multiplier: 1.9,
     },
     EncodingClass {
         char_classes: &TURKISH,
@@ -317,7 +311,7 @@ static ENCODING_CLASSES: [EncodingClass; 10] = [
         languages: &["he", "yi"],
         name: "hebrew",
         space_divisor: 6.0,
-        multiplier: 1.0,
+        multiplier: 2.6,
     },
     EncodingClass {
         char_classes: &ARABIC,
@@ -325,7 +319,7 @@ static ENCODING_CLASSES: [EncodingClass; 10] = [
         languages: &["ar", "fa", "ur"],
         name: "arabic",
         space_divisor: 8.0,
-        multiplier: 1.0,
+        multiplier: 3.0,
     },
     EncodingClass {
         char_classes: &BALTIC,
@@ -341,7 +335,7 @@ static ENCODING_CLASSES: [EncodingClass; 10] = [
         languages: &["th"],
         name: "thai",
         space_divisor: 10.0,
-        multiplier: 1.0,
+        multiplier: 4.0,
     },
 ];
 
@@ -650,6 +644,33 @@ fn further_than_epsilon(a: u8, b: u8, e: u8) -> bool {
     delta > e
 }
 
+/// Finds the first class _after_ letters for Latin and the first
+/// non-Latin letter class for non-Latin.
+fn find_letter_boundary(encoding_class: &'static EncodingClass) -> u8 {
+    if is_latin(encoding_class.encodings[0]) {
+        for (i, chars) in encoding_class.char_classes.iter().enumerate() {
+            let first = chars[0];
+            if first == ' ' || first == '0' || first == 'a' {
+                continue;
+            }
+            if !first.is_alphabetic() {
+                return i as u8;
+            }
+        }
+    } else {
+        for (i, chars) in encoding_class.char_classes.iter().enumerate() {
+            let first = chars[0];
+            if first == ' ' || first == '0' || first == 'a' {
+                continue;
+            }
+            if first.is_alphabetic() {
+                return i as u8;
+            }
+        }
+    }
+    encoding_class.char_classes.len() as u8
+}
+
 fn suggest_merges(scores: &Vec<u8>, encoding_class: &'static EncodingClass) {
     let (ascii_classes, non_ascii_classes) = count_ascii_classes(encoding_class.char_classes);
     for e in 0..1 {
@@ -690,6 +711,135 @@ fn suggest_merges(scores: &Vec<u8>, encoding_class: &'static EncodingClass) {
     }
 }
 
+fn find_class(c: char, char_classes: &'static [&'static [char]]) -> Option<usize> {
+    for (i, chars) in char_classes.iter().enumerate() {
+        if chars[0] == c {
+            return Some(i);
+        }
+    }
+    None
+}
+
+fn force_implausibility_next_to_alphabetic(
+    c: char,
+    implausible_after_alphabetic: bool,
+    byte_vec: &mut Vec<u8>,
+    char_classes: &'static [&'static [char]],
+    ascii_classes: usize,
+    non_ascii_classes: usize,
+) {
+    if let Some(special) = find_class(c, char_classes) {
+        for (i, chars) in char_classes.iter().enumerate() {
+            if chars[0].is_alphabetic() {
+                let (first, second) = if implausible_after_alphabetic {
+                    (i, special)
+                } else {
+                    (special, i)
+                };
+                if let Some(index) = compute_index(first, second, ascii_classes, non_ascii_classes)
+                {
+                    byte_vec[index] = 255;
+                }
+            }
+        }
+    }
+}
+
+fn force_implausibility(byte_vec: &mut Vec<u8>, encoding_class: &'static EncodingClass) {
+    // The use case for this stuff is primarily to avoid misdetecting windows-1250 as other Latin and to avoid misdetecting
+    // Greek as Hebrew or Cyrillic.
+    let (ascii_classes, non_ascii_classes) = count_ascii_classes(encoding_class.char_classes);
+    // Ordinal indicators are supposed to be preceded by a digit and be followed by space.
+    force_implausibility_next_to_alphabetic(
+        'ª',
+        true,
+        byte_vec,
+        encoding_class.char_classes,
+        ascii_classes,
+        non_ascii_classes,
+    );
+    force_implausibility_next_to_alphabetic(
+        'ª',
+        false,
+        byte_vec,
+        encoding_class.char_classes,
+        ascii_classes,
+        non_ascii_classes,
+    );
+    // Superscript numbers, OK after digit as exponent or after letter as footnote but not OK right before a letter.
+    force_implausibility_next_to_alphabetic(
+        '¹',
+        false,
+        byte_vec,
+        encoding_class.char_classes,
+        ascii_classes,
+        non_ascii_classes,
+    );
+    // Spanish leading punctuation should precede a letter, not follow one.
+    force_implausibility_next_to_alphabetic(
+        '¡',
+        true,
+        byte_vec,
+        encoding_class.char_classes,
+        ascii_classes,
+        non_ascii_classes,
+    );
+    // LRM and RLM are meant to be used after a punctuation character before space. Let's mark them implausible before and after
+    // a letter. It's not technically wrong for them to appear next to a letter, but there's no need, and allowing it causes
+    // misdetections of Greek as Hebrew.
+    force_implausibility_next_to_alphabetic(
+        '\u{200E}',
+        true,
+        byte_vec,
+        encoding_class.char_classes,
+        ascii_classes,
+        non_ascii_classes,
+    );
+    force_implausibility_next_to_alphabetic(
+        '\u{200E}',
+        false,
+        byte_vec,
+        encoding_class.char_classes,
+        ascii_classes,
+        non_ascii_classes,
+    );
+    // Box drawing in principle can occur next to a letter, but box drawing is rare on the Web, so let's mark box drawing next
+    // to a letter implausible in order to reduce misdetecting stuff as IBM866 and KOI8-U.
+    force_implausibility_next_to_alphabetic(
+        '─',
+        true,
+        byte_vec,
+        encoding_class.char_classes,
+        ascii_classes,
+        non_ascii_classes,
+    );
+    force_implausibility_next_to_alphabetic(
+        '─',
+        false,
+        byte_vec,
+        encoding_class.char_classes,
+        ascii_classes,
+        non_ascii_classes,
+    );
+    // Lone accents cause misdetections, so mark them implausible next to alphabetic (either side). (For Greek, acute/tones is _not_ in this class!)
+    force_implausibility_next_to_alphabetic(
+        '¨',
+        true,
+        byte_vec,
+        encoding_class.char_classes,
+        ascii_classes,
+        non_ascii_classes,
+    );
+    force_implausibility_next_to_alphabetic(
+        '¨',
+        false,
+        byte_vec,
+        encoding_class.char_classes,
+        ascii_classes,
+        non_ascii_classes,
+    );
+}
+
 fn train_with_dir(dir: &Path, rs: &Path) {
     let float_scores = ENCODING_CLASSES
         .iter()
@@ -723,6 +873,10 @@ fn train_with_dir(dir: &Path, rs: &Path) {
             }
         }
         scores.push((byte_vec, *encoding_class));
+    }
+
+    for (byte_vec, encoding_class) in scores.iter_mut() {
+        force_implausibility(byte_vec, encoding_class);
     }
 
     for (float_vec, encoding_class) in float_scores.iter() {
@@ -876,24 +1030,6 @@ fn generate_upper_table(
     vec
 }
 
-fn mark_ascii_letters_as_non_pairing(vec: &mut Vec<u8>) {
-    assert_eq!(vec.len(), 128);
-    for i in 0..128 {
-        if i >= b'a' && i <= b'z' {
-            vec[i as usize] = 0x7E;
-        } else if i >= b'A' && i <= b'Z' {
-            vec[i as usize] = 0xFE;
-        }
-    }
-}
-
-fn generate_non_latin_ascii_table() -> Vec<u8> {
-    let mut vec = Vec::new();
-    vec.resize(128, 0u8);
-    mark_ascii_letters_as_non_pairing(&mut vec);
-    vec
-}
-
 fn write_rs_file(rs: &Path, scores: &Vec<(Vec<u8>, &'static EncodingClass)>) {
     let file = File::create(rs).expect("Unable to create output file.");
     let mut writer = BufWriter::new(file);
@@ -984,7 +1120,9 @@ use super::IMPLAUSIBILITY_PENALTY;
 
     writer.write_all(b"    non_latin_ascii: [\n").unwrap();
 
-    write_class_mapping_table(&mut writer, &generate_non_latin_ascii_table());
+    let cyrillic = encoding_class_by_encoding(WINDOWS_1251);
+    let cyrillic_ascii = generate_ascii_table(cyrillic.char_classes, cyrillic.encodings[0]);
+    write_class_mapping_table(&mut writer, &cyrillic_ascii);
 
     writer.write_all(b"    ],\n").unwrap();
 
@@ -1017,8 +1155,7 @@ use super::IMPLAUSIBILITY_PENALTY;
     writer.write_all(b"    hebrew_ascii: [\n").unwrap();
 
     let hebrew = encoding_class_by_encoding(WINDOWS_1255);
-    let mut hebrew_ascii = generate_ascii_table(hebrew.char_classes, hebrew.encodings[0]);
-    mark_ascii_letters_as_non_pairing(&mut hebrew_ascii);
+    let hebrew_ascii = generate_ascii_table(hebrew.char_classes, hebrew.encodings[0]);
     write_class_mapping_table(&mut writer, &hebrew_ascii);
 
     writer.write_all(b"    ],\n").unwrap();
@@ -1121,14 +1258,10 @@ pub struct SingleByteData {
     probabilities: &'static [u8],
     ascii: usize,
     non_ascii: usize,
+    letter_boundary: u8,
 }
 
 impl SingleByteData {
-    #[inline(always)]
-    pub fn is_ascii_class(&self, caseless_class: u8) -> bool {
-        (caseless_class as usize) < self.ascii
-    }
-
     #[inline(always)]
     pub fn classify(&'static self, byte: u8) -> u8 {
         let high = byte >> 7;
@@ -1141,14 +1274,18 @@ impl SingleByteData {
     }
 
     #[inline(always)]
+    pub fn is_latin_alphabetic(&'static self, byte: u8) -> bool {
+        return byte >= 2 && byte < self.letter_boundary;
+    }
+
+    #[inline(always)]
+    pub fn is_non_latin_alphabetic(&'static self, byte: u8) -> bool {
+        return byte >= self.letter_boundary;
+    }
+
+    #[inline(always)]
     pub fn score(&'static self, current_class: u8, previous_class: u8) -> i64 {
-        if ((current_class == 0x7E) ^ (previous_class == 0x7E))
-            && !((current_class as usize) < self.ascii || (previous_class as usize) < self.ascii)
-        {
-            LATIN_ADJACENCY_PENALTY
-        } else if (current_class == 0x7E) || (previous_class == 0x7E) {
-            0
-        } else if let Some(index) = compute_index(
+        if let Some(index) = compute_index(
             usize::from(previous_class),
             usize::from(current_class),
             self.ascii,
@@ -1163,6 +1300,13 @@ impl SingleByteData {
         } else {
             0
         }
+    }
+}
+
+impl PartialEq for SingleByteData {
+    #[inline]
+    fn eq(&self, other: &SingleByteData) -> bool {
+        (self as *const SingleByteData) == (other as *const SingleByteData)
     }
 }
 
@@ -1194,6 +1338,7 @@ impl SingleByteData {
             };
             let encoding_upper = encoding_name_to_constant(encoding.name());
             let encoding_snake = encoding_name_to_snake(encoding.name());
+            let letter_boundary = find_letter_boundary(encoding_class);
             writer
                 .write_fmt(format_args!(
                     "    SingleByteData {{
@@ -1203,6 +1348,7 @@ impl SingleByteData {
         probabilities: &DETECTOR_DATA.{},
         ascii: {}_ASCII,
         non_ascii: {}_NON_ASCII,
+        letter_boundary: {},
     }},\n",
                     encoding_upper,
                     lower,
@@ -1210,6 +1356,7 @@ impl SingleByteData {
                     encoding_class.name,
                     class_upper,
                     class_upper,
+                    letter_boundary,
                 ))
                 .unwrap();
         }
