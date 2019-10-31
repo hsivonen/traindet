@@ -335,7 +335,7 @@ static ENCODING_CLASSES: [EncodingClass; 10] = [
         languages: &["th"],
         name: "thai",
         space_divisor: 10.0,
-        multiplier: 4.0,
+        multiplier: 6.0,
     },
 ];
 
@@ -475,9 +475,6 @@ fn compute_index(
     non_ascii_classes: usize,
 ) -> Option<usize> {
     if x == 0 && y == 0 {
-        return None;
-    }
-    if x == 254 || y == 254 {
         return None;
     }
     if x < ascii_classes && y < ascii_classes {
@@ -1235,9 +1232,6 @@ fn compute_index(
     if x == 0 && y == 0 {
         return None;
     }
-    if x == 254 || y == 254 {
-        return None;
-    }
     if x < ascii_classes && y < ascii_classes {
         return None;
     }
@@ -1406,10 +1400,11 @@ fn write_probability_table(
     char_classes: &'static [&'static [char]],
 ) {
     let side = ascii + non_ascii;
-    for i in 0..side {
+    for row in 0..side {
         writer.write_all(b"        ").unwrap();
-        for j in 0..side {
-            if let Some(index) = compute_index(i, j, ascii, non_ascii) {
+        for column in 0..side {
+            if let Some(index) = compute_index(column, row, ascii, non_ascii) {
+                // writer.write_fmt(format_args!("/*{}*/", index)).unwrap();
                 write_byte(writer, table[index]);
             } else {
                 writer.write(b"    ").unwrap();
@@ -1417,14 +1412,14 @@ fn write_probability_table(
         }
         writer.write_all(b" // ").unwrap();
         writer
-            .write_fmt(format_args!("{},", char_classes[i][0]))
+            .write_fmt(format_args!("{},", char_classes[row][0]))
             .unwrap();
         writer.write_all(b"\n").unwrap();
     }
     writer.write_all(b"      //").unwrap();
-    for i in 0..side {
+    for column in 0..side {
         writer
-            .write_fmt(format_args!("  {},", char_classes[i][0]))
+            .write_fmt(format_args!("  {},", char_classes[column][0]))
             .unwrap();
     }
     writer.write_all(b"\n").unwrap();
