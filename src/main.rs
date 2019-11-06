@@ -188,15 +188,15 @@ impl EncodingClass {
                     // single-byte Arabic encodings on the Web are
                     // rare, this intervention makes the detector
                     // less eager to decide Arabic.
-                    clamp(
-                        &mut scores,
-                        self.char_classes,
-                        ascii_classes,
-                        non_ascii_classes,
-                        windows_encoding,
-                        'ا',
-                        'ئ',
-                    );
+                    // clamp(
+                    //     &mut scores,
+                    //     self.char_classes,
+                    //     ascii_classes,
+                    //     non_ascii_classes,
+                    //     windows_encoding,
+                    //     'ا',
+                    //     'ئ',
+                    // );
                 }
 
                 let mut max = 0.0f64;
@@ -250,7 +250,7 @@ static ENCODING_CLASSES: [EncodingClass; 10] = [
         encodings: &[&WINDOWS_1258_INIT],
         languages: &["vi"],
         name: "vietnamese",
-        space_divisor: 10.0,
+        space_divisor: 1.0,
         multiplier: 1.0,
     },
     EncodingClass {
@@ -258,7 +258,7 @@ static ENCODING_CLASSES: [EncodingClass; 10] = [
         encodings: &[&WINDOWS_1250_INIT, &ISO_8859_2_INIT],
         languages: &["pl", "hu", "sh", "cs", "ro", "sk", "hr", "sl", "bs", "sq"],
         name: "central",
-        space_divisor: 10.0,
+        space_divisor: 1.0,
         multiplier: 1.0,
     },
     EncodingClass {
@@ -274,19 +274,20 @@ static ENCODING_CLASSES: [EncodingClass; 10] = [
         // mn uses mapping to uk letters
         languages: &["ru", "uk", "sr", "bg", "ce", "be", "mk", "mn"],
         name: "cyrillic",
-        space_divisor: 5.0,
+        space_divisor: 1.0,
         multiplier: 1.0,
     },
+    // XXX Icelandic
     EncodingClass {
         char_classes: &WESTERN,
         encodings: &[&WINDOWS_1252_INIT],
         // Intentionally omitting ASCII or almost-ASCII languages like en, nl, id, so, sw, various Malay-alphabet languages
         languages: &[
             "sv", "de", "fr", "it", "es", "pt", "ca", "no", "fi", "eu", "da", "gl", "nn", "oc",
-            "br", "lb", "ht", "ga", "is", "an", "wa", "gd", "fo", "li",
+            "br", "lb", "ht", "ga", "an", "wa", "gd", "fo", "li",
         ],
         name: "western",
-        space_divisor: 10.0,
+        space_divisor: 0.0,
         multiplier: 1.0,
     },
     EncodingClass {
@@ -294,15 +295,15 @@ static ENCODING_CLASSES: [EncodingClass; 10] = [
         encodings: &[&WINDOWS_1253_INIT, &ISO_8859_7_INIT],
         languages: &["el"],
         name: "greek",
-        space_divisor: 3.0,
-        multiplier: 1.9,
+        space_divisor: 1.0,
+        multiplier: 1.3,
     },
     EncodingClass {
         char_classes: &TURKISH,
         encodings: &[&WINDOWS_1254_INIT],
         languages: &["tr", "az", "ku"],
         name: "turkish",
-        space_divisor: 10.0,
+        space_divisor: 1.0,
         multiplier: 1.0,
     },
     EncodingClass {
@@ -310,23 +311,23 @@ static ENCODING_CLASSES: [EncodingClass; 10] = [
         encodings: &[&WINDOWS_1255_INIT, &ISO_8859_8_INIT],
         languages: &["he", "yi"],
         name: "hebrew",
-        space_divisor: 6.0,
-        multiplier: 2.6,
+        space_divisor: 1.0,
+        multiplier: 2.0,
     },
     EncodingClass {
         char_classes: &ARABIC,
         encodings: &[&WINDOWS_1256_INIT, &ISO_8859_6_INIT],
         languages: &["ar", "fa", "ur"],
         name: "arabic",
-        space_divisor: 8.0,
-        multiplier: 3.0,
+        space_divisor: 1.0,
+        multiplier: 1.8,
     },
     EncodingClass {
         char_classes: &BALTIC,
         encodings: &[&WINDOWS_1257_INIT, &ISO_8859_4_INIT],
         languages: &["lt", "et", "lv"],
         name: "baltic",
-        space_divisor: 10.0,
+        space_divisor: 1.0,
         multiplier: 1.0,
     },
     EncodingClass {
@@ -334,8 +335,8 @@ static ENCODING_CLASSES: [EncodingClass; 10] = [
         encodings: &[&WINDOWS_874_INIT],
         languages: &["th"],
         name: "thai",
-        space_divisor: 10.0,
-        multiplier: 6.0,
+        space_divisor: 1.0,
+        multiplier: 1.0,
     },
 ];
 
@@ -724,10 +725,11 @@ fn force_implausibility_next_to_alphabetic(
     char_classes: &'static [&'static [char]],
     ascii_classes: usize,
     non_ascii_classes: usize,
+    allow_next_to_ascii: bool,
 ) {
     if let Some(special) = find_class(c, char_classes) {
         for (i, chars) in char_classes.iter().enumerate() {
-            if chars[0].is_alphabetic() {
+            if chars[0].is_alphabetic() && (!allow_next_to_ascii || chars[0] >= '\u{80}') {
                 let (first, second) = if implausible_after_alphabetic {
                     (i, special)
                 } else {
@@ -754,6 +756,7 @@ fn force_implausibility(byte_vec: &mut Vec<u8>, encoding_class: &'static Encodin
         encoding_class.char_classes,
         ascii_classes,
         non_ascii_classes,
+        false,
     );
     force_implausibility_next_to_alphabetic(
         'ª',
@@ -762,24 +765,67 @@ fn force_implausibility(byte_vec: &mut Vec<u8>, encoding_class: &'static Encodin
         encoding_class.char_classes,
         ascii_classes,
         non_ascii_classes,
-    );
-    // Superscript numbers, OK after digit as exponent or after letter as footnote but not OK right before a letter.
-    force_implausibility_next_to_alphabetic(
-        '¹',
         false,
-        byte_vec,
-        encoding_class.char_classes,
-        ascii_classes,
-        non_ascii_classes,
     );
-    // Spanish leading punctuation should precede a letter, not follow one.
+    // Boost after number for windows-1252
+
+    // Implausible on either side of alphabetic
     force_implausibility_next_to_alphabetic(
-        '¡',
+        '¨',
         true,
         byte_vec,
         encoding_class.char_classes,
         ascii_classes,
         non_ascii_classes,
+        false,
+    );
+    force_implausibility_next_to_alphabetic(
+        '¨',
+        false,
+        byte_vec,
+        encoding_class.char_classes,
+        ascii_classes,
+        non_ascii_classes,
+        false,
+    );
+    // Implausible before alphabetic
+    force_implausibility_next_to_alphabetic(
+        '®',
+        false,
+        byte_vec,
+        encoding_class.char_classes,
+        ascii_classes,
+        non_ascii_classes,
+        false,
+    );
+    // Implausible after alphabetic
+    force_implausibility_next_to_alphabetic(
+        '©',
+        true,
+        byte_vec,
+        encoding_class.char_classes,
+        ascii_classes,
+        non_ascii_classes,
+        false,
+    );
+    // Implausible on either side of non-ASCII alphabetic
+    force_implausibility_next_to_alphabetic(
+        '¬',
+        true,
+        byte_vec,
+        encoding_class.char_classes,
+        ascii_classes,
+        non_ascii_classes,
+        true,
+    );
+    force_implausibility_next_to_alphabetic(
+        '¬',
+        false,
+        byte_vec,
+        encoding_class.char_classes,
+        ascii_classes,
+        non_ascii_classes,
+        true,
     );
     // LRM and RLM are meant to be used after a punctuation character before space. Let's mark them implausible before and after
     // a letter. It's not technically wrong for them to appear next to a letter, but there's no need, and allowing it causes
@@ -791,6 +837,7 @@ fn force_implausibility(byte_vec: &mut Vec<u8>, encoding_class: &'static Encodin
         encoding_class.char_classes,
         ascii_classes,
         non_ascii_classes,
+        false,
     );
     force_implausibility_next_to_alphabetic(
         '\u{200E}',
@@ -799,42 +846,51 @@ fn force_implausibility(byte_vec: &mut Vec<u8>, encoding_class: &'static Encodin
         encoding_class.char_classes,
         ascii_classes,
         non_ascii_classes,
+        false,
     );
-    // Box drawing in principle can occur next to a letter, but box drawing is rare on the Web, so let's mark box drawing next
-    // to a letter implausible in order to reduce misdetecting stuff as IBM866 and KOI8-U.
+    // Final sigma
     force_implausibility_next_to_alphabetic(
-        '─',
-        true,
-        byte_vec,
-        encoding_class.char_classes,
-        ascii_classes,
-        non_ascii_classes,
-    );
-    force_implausibility_next_to_alphabetic(
-        '─',
+        'ς',
         false,
         byte_vec,
         encoding_class.char_classes,
         ascii_classes,
         non_ascii_classes,
-    );
-    // Lone accents cause misdetections, so mark them implausible next to alphabetic (either side). (For Greek, acute/tones is _not_ in this class!)
-    force_implausibility_next_to_alphabetic(
-        '¨',
-        true,
-        byte_vec,
-        encoding_class.char_classes,
-        ascii_classes,
-        non_ascii_classes,
-    );
-    force_implausibility_next_to_alphabetic(
-        '¨',
         false,
-        byte_vec,
-        encoding_class.char_classes,
-        ascii_classes,
-        non_ascii_classes,
     );
+    // Mark Vietnamese tones implausible on characters that aren't valid bases or space.
+    if encoding_class.encodings[0] == WINDOWS_1258 {
+        let tones = ['\u{0300}', '\u{0309}', '\u{0303}', '\u{0301}', '\u{0323}'];
+        for &tone in tones.iter() {
+            let tone_class_index = find_class(tone, encoding_class.char_classes).unwrap();
+            for base_class_index in 0..encoding_class.char_classes.len() {
+                match encoding_class.char_classes[base_class_index][0] {
+                    'a' | 'ă' | 'â' | 'e' | 'ê' | 'i' | 'o' | 'ô' | 'ơ' | 'u' | 'ư' | 'y' => {
+                    }
+                    ' ' => {
+                        if let Some(index) = compute_index(
+                            base_class_index,
+                            tone_class_index,
+                            ascii_classes,
+                            non_ascii_classes,
+                        ) {
+                            byte_vec[index] = 0;
+                        }
+                    }
+                    _ => {
+                        if let Some(index) = compute_index(
+                            base_class_index,
+                            tone_class_index,
+                            ascii_classes,
+                            non_ascii_classes,
+                        ) {
+                            byte_vec[index] = 255;
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn train_with_dir(dir: &Path, rs: &Path) {
@@ -1073,9 +1129,8 @@ use super::IMPLAUSIBILITY_PENALTY;
     writer
         .write_all(b"    non_latin_ascii: [u8; 128],\n")
         .unwrap();
-    writer.write_all(b"    baltic_ascii: [u8; 128],\n").unwrap();
     writer
-        .write_all(b"    vietnamese_ascii: [u8; 128],\n")
+        .write_all(b"    turkish_ascii: [u8; 128],\n")
         .unwrap();
     writer.write_all(b"    hebrew_ascii: [u8; 128],\n").unwrap();
     for encoding_class in ENCODING_CLASSES.iter() {
@@ -1125,24 +1180,12 @@ use super::IMPLAUSIBILITY_PENALTY;
 
     // ---
 
-    writer.write_all(b"    baltic_ascii: [\n").unwrap();
+    writer.write_all(b"    turkish_ascii: [\n").unwrap();
 
-    let baltic = encoding_class_by_encoding(WINDOWS_1257);
+    let turkish = encoding_class_by_encoding(WINDOWS_1254);
     write_class_mapping_table(
         &mut writer,
-        &generate_ascii_table(baltic.char_classes, baltic.encodings[0]),
-    );
-
-    writer.write_all(b"    ],\n").unwrap();
-
-    // ---
-
-    writer.write_all(b"    vietnamese_ascii: [\n").unwrap();
-
-    let vietnamese = encoding_class_by_encoding(WINDOWS_1258);
-    write_class_mapping_table(
-        &mut writer,
-        &generate_ascii_table(vietnamese.char_classes, vietnamese.encodings[0]),
+        &generate_ascii_table(turkish.char_classes, turkish.encodings[0]),
     );
 
     writer.write_all(b"    ],\n").unwrap();
@@ -1323,10 +1366,8 @@ impl PartialEq for SingleByteData {
                 || windows_encoding == WINDOWS_1254
             {
                 "latin_ascii"
-            } else if windows_encoding == WINDOWS_1257 {
-                "baltic_ascii"
-            } else if windows_encoding == WINDOWS_1258 {
-                "vietnamese_ascii"
+            } else if windows_encoding == WINDOWS_1254 {
+                "turkish_ascii"
             } else {
                 "non_latin_ascii"
             };

@@ -12,3 +12,6 @@ unic-normal = "0.9.0"
 detone = "1.0.0"
 detector_char_classes = { path = "../detector_char_classes" }
 rayon = "1.0.3"
+
+[profile.dev]
+panic = "abort"
