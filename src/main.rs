@@ -277,14 +277,14 @@ static ENCODING_CLASSES: [EncodingClass; 10] = [
         space_divisor: 1.0,
         multiplier: 1.0,
     },
-    // XXX Icelandic
+    // XXX Icelandic "is", "fo"
     EncodingClass {
         char_classes: &WESTERN,
         encodings: &[&WINDOWS_1252_INIT],
         // Intentionally omitting ASCII or almost-ASCII languages like en, nl, id, so, sw, various Malay-alphabet languages
         languages: &[
             "sv", "de", "fr", "it", "es", "pt", "ca", "no", "fi", "eu", "da", "gl", "nn", "oc",
-            "br", "lb", "ht", "ga", "an", "wa", "gd", "fo", "li",
+            "br", "lb", "ht", "ga", "an", "wa", "gd", "li",
         ],
         name: "western",
         space_divisor: 0.0,
@@ -320,7 +320,7 @@ static ENCODING_CLASSES: [EncodingClass; 10] = [
         languages: &["ar", "fa", "ur"],
         name: "arabic",
         space_divisor: 1.0,
-        multiplier: 1.8,
+        multiplier: 1.0,
     },
     EncodingClass {
         char_classes: &BALTIC,
@@ -336,7 +336,7 @@ static ENCODING_CLASSES: [EncodingClass; 10] = [
         languages: &["th"],
         name: "thai",
         space_divisor: 1.0,
-        multiplier: 1.0,
+        multiplier: 1.7,
     },
 ];
 
@@ -744,10 +744,26 @@ fn force_implausibility_next_to_alphabetic(
     }
 }
 
+fn force_implausibility_next_to_self(
+    c: char,
+    byte_vec: &mut Vec<u8>,
+    char_classes: &'static [&'static [char]],
+    ascii_classes: usize,
+    non_ascii_classes: usize,
+) {
+    if let Some(special) = find_class(c, char_classes) {
+        if let Some(index) = compute_index(special, special, ascii_classes, non_ascii_classes) {
+            byte_vec[index] = 255;
+        }
+    }
+}
+
 fn force_implausibility(byte_vec: &mut Vec<u8>, encoding_class: &'static EncodingClass) {
     // The use case for this stuff is primarily to avoid misdetecting windows-1250 as other Latin and to avoid misdetecting
     // Greek as Hebrew or Cyrillic.
     let (ascii_classes, non_ascii_classes) = count_ascii_classes(encoding_class.char_classes);
+    // TODO: Force implausibility next to itself
+    // '·', plus the classes below
     // Ordinal indicators are supposed to be preceded by a digit and be followed by space.
     force_implausibility_next_to_alphabetic(
         'ª',
@@ -766,6 +782,13 @@ fn force_implausibility(byte_vec: &mut Vec<u8>, encoding_class: &'static Encodin
         ascii_classes,
         non_ascii_classes,
         false,
+    );
+    force_implausibility_next_to_self(
+        'ª',
+        byte_vec,
+        encoding_class.char_classes,
+        ascii_classes,
+        non_ascii_classes,
     );
     // Boost after number for windows-1252
 
@@ -788,6 +811,13 @@ fn force_implausibility(byte_vec: &mut Vec<u8>, encoding_class: &'static Encodin
         non_ascii_classes,
         false,
     );
+    force_implausibility_next_to_self(
+        '¨',
+        byte_vec,
+        encoding_class.char_classes,
+        ascii_classes,
+        non_ascii_classes,
+    );
     // Implausible before alphabetic
     force_implausibility_next_to_alphabetic(
         '®',
@@ -798,6 +828,13 @@ fn force_implausibility(byte_vec: &mut Vec<u8>, encoding_class: &'static Encodin
         non_ascii_classes,
         false,
     );
+    force_implausibility_next_to_self(
+        '®',
+        byte_vec,
+        encoding_class.char_classes,
+        ascii_classes,
+        non_ascii_classes,
+    );
     // Implausible after alphabetic
     force_implausibility_next_to_alphabetic(
         '©',
@@ -807,6 +844,13 @@ fn force_implausibility(byte_vec: &mut Vec<u8>, encoding_class: &'static Encodin
         ascii_classes,
         non_ascii_classes,
         false,
+    );
+    force_implausibility_next_to_self(
+        '©',
+        byte_vec,
+        encoding_class.char_classes,
+        ascii_classes,
+        non_ascii_classes,
     );
     // Implausible on either side of non-ASCII alphabetic
     force_implausibility_next_to_alphabetic(
@@ -826,6 +870,13 @@ fn force_implausibility(byte_vec: &mut Vec<u8>, encoding_class: &'static Encodin
         ascii_classes,
         non_ascii_classes,
         true,
+    );
+    force_implausibility_next_to_self(
+        '¬',
+        byte_vec,
+        encoding_class.char_classes,
+        ascii_classes,
+        non_ascii_classes,
     );
     // LRM and RLM are meant to be used after a punctuation character before space. Let's mark them implausible before and after
     // a letter. It's not technically wrong for them to appear next to a letter, but there's no need, and allowing it causes
@@ -847,6 +898,13 @@ fn force_implausibility(byte_vec: &mut Vec<u8>, encoding_class: &'static Encodin
         ascii_classes,
         non_ascii_classes,
         false,
+    );
+    force_implausibility_next_to_self(
+        '\u{200E}',
+        byte_vec,
+        encoding_class.char_classes,
+        ascii_classes,
+        non_ascii_classes,
     );
     // Final sigma
     force_implausibility_next_to_alphabetic(
