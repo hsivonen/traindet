@@ -12,6 +12,14 @@ use detector_char_classes::*;
 use detone::IterDecomposeVietnamese;
 use encoding_rs::DecoderResult;
 use encoding_rs::Encoding;
+use encoding_rs::BIG5;
+use encoding_rs::BIG5_INIT;
+use encoding_rs::EUC_JP;
+use encoding_rs::EUC_JP_INIT;
+use encoding_rs::EUC_KR;
+use encoding_rs::EUC_KR_INIT;
+use encoding_rs::GBK;
+use encoding_rs::GBK_INIT;
 use encoding_rs::IBM866_INIT;
 use encoding_rs::ISO_8859_2_INIT;
 use encoding_rs::ISO_8859_4_INIT;
@@ -26,6 +34,7 @@ use encoding_rs::WINDOWS_1252;
 use encoding_rs::WINDOWS_1255;
 use encoding_rs::WINDOWS_1257;
 
+use encoding_rs::EncoderResult;
 use encoding_rs::WINDOWS_1250;
 use encoding_rs::WINDOWS_1250_INIT;
 use encoding_rs::WINDOWS_1251_INIT;
@@ -338,6 +347,13 @@ static ENCODING_CLASSES: [EncodingClass; 10] = [
         space_divisor: 1.0,
         multiplier: 1.7,
     },
+];
+
+static CJK_ENCODINGS: [(&'static str, &'static Encoding, &'static str); 4] = [
+    ("zh-hans", &GBK_INIT, "simplified"),
+    ("zh-hant", &BIG5_INIT, "traditional"),
+    ("ja", &EUC_JP_INIT, "kanji"),
+    ("ko", &EUC_KR_INIT, "hangul"),
 ];
 
 fn write_scores(path: &Path, scores: &[u64]) {
@@ -1017,7 +1033,73 @@ fn train_with_dir(dir: &Path, rs: &Path) {
         suggest_merges(&byte_vec, encoding_class);
     }
 
-    write_rs_file(rs, &scores);
+    // CJK
+
+    let mut cjk_scores = Vec::new();
+
+    for (lang, encoding, name) in CJK_ENCODINGS.iter() {
+        cjk_scores.push((cjk_frequent(dir, lang, encoding), *name));
+    }
+
+    write_rs_file(rs, &scores, &cjk_scores);
+}
+
+fn cjk_frequent(dir: &Path, lang: &str, encoding: &'static Encoding) -> Vec<u16> {
+    let (start, end) = cjk_bounds(lang);
+    let count_path = gen_count_path(dir, lang, false);
+    let counts = load_u64(&count_path);
+    assert_eq!(counts.len(), end - start);
+
+    let mut sortable: Vec<(usize, u64)> = counts
+        .iter()
+        .enumerate()
+        .map(|(i, count)| (i + start, *count))
+        .collect();
+    sortable.sort_by(|a, b| b.1.cmp(&a.1));
+
+    let lead_bound = if encoding == EUC_KR {
+        0xC9
+    } else if encoding == BIG5 {
+        0xC7
+    } else if encoding == GBK {
+        0xD8
+    } else if encoding == EUC_JP {
+        0xD0
+    } else {
+        unreachable!();
+    };
+    let mut ret = Vec::new();
+
+    let mut output = [0u8; 4];
+    let mut input = [0u16; 1];
+    let mut encoder = encoding.new_encoder();
+    // We take 128 most frequent code points that encode
+    // to the EUC square part of Level 1 / Hangul.
+    // Specifically, for Big5, we don't want the part of
+    // Level 1 Hanzi that does not overlap EUC.
+    for (point, _) in sortable {
+        let u = point as u16;
+        input[0] = u;
+        let (result, read, written) =
+            encoder.encode_from_utf16_without_replacement(&input, &mut output, false);
+        assert_eq!(result, EncoderResult::InputEmpty);
+        assert_eq!(read, 1);
+        if written != 2 {
+            continue;
+        }
+        match (output[0], output[1]) {
+            (0xA1..=0xFE, 0xA1..=0xFE) => {
+                assert!(output[0] < lead_bound);
+                ret.push(u);
+                if ret.len() == 128 {
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    ret
 }
 
 fn encoding_name_to_snake(name: &str) -> String {
@@ -1141,7 +1223,11 @@ fn generate_upper_table(
     vec
 }
 
-fn write_rs_file(rs: &Path, scores: &Vec<(Vec<u8>, &'static EncodingClass)>) {
+fn write_rs_file(
+    rs: &Path,
+    scores: &Vec<(Vec<u8>, &'static EncodingClass)>,
+    cjk_scores: &Vec<(Vec<u16>, &'static str)>,
+) {
     let file = File::create(rs).expect("Unable to create output file.");
     let mut writer = BufWriter::new(file);
     writer
@@ -1183,6 +1269,19 @@ use super::IMPLAUSIBILITY_PENALTY;
         .write_all(b"#[repr(align(64))] // Align to cache lines\n")
         .unwrap();
     writer.write_all(b"struct DetectorData {\n").unwrap();
+    writer
+        .write_all(b"    frequent_simplified: [u16; 128],\n")
+        .unwrap();
+    writer
+        .write_all(b"    frequent_traditional: [u16; 128],\n")
+        .unwrap();
+    writer
+        .write_all(b"    frequent_kanji: [u16; 128],\n")
+        .unwrap();
+    writer
+        .write_all(b"    frequent_hangul: [u16; 128],\n")
+        .unwrap();
+
     writer.write_all(b"    latin_ascii: [u8; 128],\n").unwrap();
     writer
         .write_all(b"    non_latin_ascii: [u8; 128],\n")
@@ -1213,6 +1312,16 @@ use super::IMPLAUSIBILITY_PENALTY;
     writer
         .write_all(b"static DETECTOR_DATA: DetectorData = DetectorData {\n")
         .unwrap();
+
+    // ---
+
+    for (scores, name) in cjk_scores.iter() {
+        writer.write_all(b"    frequent_").unwrap();
+        writer.write_all(name.as_bytes()).unwrap();
+        writer.write_all(b": [\n").unwrap();
+        write_cjk_frequency_table(&mut writer, scores);
+        writer.write_all(b"    ],\n").unwrap();
+    }
 
     // ---
 
@@ -1419,10 +1528,7 @@ impl PartialEq for SingleByteData {
             let windows_encoding = encoding_class.encodings[0];
             let lower = if windows_encoding == WINDOWS_1255 {
                 "hebrew_ascii"
-            } else if windows_encoding == WINDOWS_1252
-                || windows_encoding == WINDOWS_1250
-                || windows_encoding == WINDOWS_1254
-            {
+            } else if windows_encoding == WINDOWS_1252 || windows_encoding == WINDOWS_1250 {
                 "latin_ascii"
             } else if windows_encoding == WINDOWS_1254 {
                 "turkish_ascii"
@@ -1486,6 +1592,20 @@ fn write_class_mapping_table(writer: &mut dyn Write, table: &[u8]) {
         for j in 0..16 {
             let index = i * 16 + j;
             write_byte(writer, table[index]);
+        }
+        writer.write_all(b"\n").unwrap();
+    }
+}
+
+fn write_cjk_frequency_table(writer: &mut dyn Write, table: &[u16]) {
+    assert_eq!(table.len(), 128);
+    for i in 0..8 {
+        writer.write_all(b"        ").unwrap();
+        for j in 0..16 {
+            let index = i * 16 + j;
+            writer
+                .write_fmt(format_args!("0x{:X}, ", table[index]))
+                .unwrap();
         }
         writer.write_all(b"\n").unwrap();
     }
@@ -1564,6 +1684,30 @@ fn count_pairs(dir: &Path) {
     ENCODING_CLASSES.par_iter().for_each(|c| c.count(dir));
 }
 
+fn cjk_bounds(lang: &str) -> (usize, usize) {
+    if lang == "ko" {
+        (0xAC00, 0xD7A4)
+    } else {
+        (0x4E00, 0x9FA6)
+    }
+}
+
+fn count_cjk(dir: &Path, lang: &str, start: usize, end: usize) {
+    eprintln!("Counting {:?}", lang);
+    let mut scores = Vec::new();
+    scores.resize(end - start, 0u64);
+    let corpus = find_file(dir, lang);
+    let iter = open_bzip2(&corpus);
+    for c in iter {
+        let offset = (c as usize).wrapping_sub(start);
+        if offset < scores.len() {
+            scores[offset] += 1;
+        }
+    }
+    let path = gen_count_path(dir, lang, false);
+    write_scores(&path, &scores);
+}
+
 fn main() {
     let mut args = std::env::args_os();
     if args.next().is_none() {
@@ -1580,7 +1724,16 @@ fn main() {
             }
         } else if "count" == command {
             if let Some(path) = args.next() {
-                count_pairs(Path::new(&path));
+                let dir = Path::new(&path);
+                rayon::join(
+                    || count_pairs(dir),
+                    || {
+                        CJK_ENCODINGS.par_iter().for_each(|(lang, _, _)| {
+                            let (start, end) = cjk_bounds(lang);
+                            count_cjk(dir, lang, start, end)
+                        })
+                    },
+                );
             } else {
                 eprintln!("Error: Download directory missing.");
                 std::process::exit(-3);
