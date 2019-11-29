@@ -250,7 +250,7 @@ impl EncodingClass {
     }
 }
 
-static ENCODING_CLASSES: [EncodingClass; 10] = [
+static ENCODING_CLASSES: [EncodingClass; 11] = [
     // Vietnamese consumes the corpus twice, so put it first
     // to maximize parallelism.
     // In the `encodings` field, the Windows encoding comes first.
@@ -300,6 +300,15 @@ static ENCODING_CLASSES: [EncodingClass; 10] = [
         multiplier: 1.0,
     },
     EncodingClass {
+        char_classes: &ICELANDIC,
+        encodings: &[&WINDOWS_1252_INIT],
+        // Intentionally omitting ASCII or almost-ASCII languages like en, nl, id, so, sw, various Malay-alphabet languages
+        languages: &["is", "fo"],
+        name: "icelandic",
+        space_divisor: 0.0,
+        multiplier: 1.0,
+    },
+    EncodingClass {
         char_classes: &GREEK,
         encodings: &[&WINDOWS_1253_INIT, &ISO_8859_7_INIT],
         languages: &["el"],
@@ -313,7 +322,7 @@ static ENCODING_CLASSES: [EncodingClass; 10] = [
         languages: &["tr", "az", "ku"],
         name: "turkish",
         space_divisor: 1.0,
-        multiplier: 1.0,
+        multiplier: 1.8,
     },
     EncodingClass {
         char_classes: &HEBREW,
@@ -349,9 +358,10 @@ static ENCODING_CLASSES: [EncodingClass; 10] = [
     },
 ];
 
-static CJK_ENCODINGS: [(&'static str, &'static Encoding, &'static str); 4] = [
+static CJK_ENCODINGS: [(&'static str, &'static Encoding, &'static str); 3] = [
     ("zh-hans", &GBK_INIT, "simplified"),
-    ("zh-hant", &BIG5_INIT, "traditional"),
+    // Big5 is distinctive without extra data
+    // ("zh-hant", &BIG5_INIT, "traditional"),
     ("ja", &EUC_JP_INIT, "kanji"),
     ("ko", &EUC_KR_INIT, "hangul"),
 ];
@@ -932,6 +942,30 @@ fn force_implausibility(byte_vec: &mut Vec<u8>, encoding_class: &'static Encodin
         non_ascii_classes,
         false,
     );
+    // To avoid misdetection of Turkish and Lithuanian, we
+    // make the Icelandic and Faroese implausible in the
+    // main windows-1252 model. (There's a separate model
+    // for Icelandic and Fareose.)
+    if encoding_class.name == "western" {
+        force_implausibility_next_to_alphabetic(
+            'þ',
+            false,
+            byte_vec,
+            encoding_class.char_classes,
+            ascii_classes,
+            non_ascii_classes,
+            false,
+        );
+        force_implausibility_next_to_alphabetic(
+            'þ',
+            true,
+            byte_vec,
+            encoding_class.char_classes,
+            ascii_classes,
+            non_ascii_classes,
+            false,
+        );
+    }
     // Mark Vietnamese tones implausible on characters that aren't valid bases or space.
     if encoding_class.encodings[0] == WINDOWS_1258 {
         let tones = ['\u{0300}', '\u{0309}', '\u{0303}', '\u{0301}', '\u{0323}'];
@@ -1268,18 +1302,18 @@ use super::IMPLAUSIBILITY_PENALTY;
     writer
         .write_all(b"#[repr(align(64))] // Align to cache lines\n")
         .unwrap();
-    writer.write_all(b"struct DetectorData {\n").unwrap();
+    writer.write_all(b"pub struct DetectorData {\n").unwrap();
     writer
-        .write_all(b"    frequent_simplified: [u16; 128],\n")
+        .write_all(b"    pub frequent_simplified: [u16; 128],\n")
+        .unwrap();
+    // writer
+    //     .write_all(b"    pub frequent_traditional: [u16; 128],\n")
+    //     .unwrap();
+    writer
+        .write_all(b"    pub frequent_kanji: [u16; 128],\n")
         .unwrap();
     writer
-        .write_all(b"    frequent_traditional: [u16; 128],\n")
-        .unwrap();
-    writer
-        .write_all(b"    frequent_kanji: [u16; 128],\n")
-        .unwrap();
-    writer
-        .write_all(b"    frequent_hangul: [u16; 128],\n")
+        .write_all(b"    pub frequent_hangul: [u16; 128],\n")
         .unwrap();
 
     writer.write_all(b"    latin_ascii: [u8; 128],\n").unwrap();
@@ -1296,6 +1330,9 @@ use super::IMPLAUSIBILITY_PENALTY;
             writer
                 .write_all(encoding_name_to_snake(encoding.name()).as_bytes())
                 .unwrap();
+            if encoding_class.name == "icelandic" {
+                writer.write_all(b"_icelandic").unwrap();
+            }
             writer.write_all(b": [u8; 128],\n").unwrap();
         }
     }
@@ -1310,7 +1347,7 @@ use super::IMPLAUSIBILITY_PENALTY;
 
     writer.write_all(b"#[rustfmt::skip]\n").unwrap();
     writer
-        .write_all(b"static DETECTOR_DATA: DetectorData = DetectorData {\n")
+        .write_all(b"pub static DETECTOR_DATA: DetectorData = DetectorData {\n")
         .unwrap();
 
     // ---
@@ -1375,6 +1412,9 @@ use super::IMPLAUSIBILITY_PENALTY;
             writer
                 .write_all(encoding_name_to_snake(encoding.name()).as_bytes())
                 .unwrap();
+            if encoding_class.name == "icelandic" {
+                writer.write_all(b"_icelandic").unwrap();
+            }
             writer.write_all(b": [\n").unwrap();
 
             write_class_mapping_table(
@@ -1519,7 +1559,7 @@ impl PartialEq for SingleByteData {
         .unwrap();
 
     writer
-        .write_all(b"pub static SINGLE_BYTE_DATA: [SingleByteData; 18] = [\n")
+        .write_all(b"pub static SINGLE_BYTE_DATA: [SingleByteData; 19] = [\n")
         .unwrap();
 
     for encoding_class in ENCODING_CLASSES.iter() {
@@ -1536,7 +1576,10 @@ impl PartialEq for SingleByteData {
                 "non_latin_ascii"
             };
             let encoding_upper = encoding_name_to_constant(encoding.name());
-            let encoding_snake = encoding_name_to_snake(encoding.name());
+            let mut encoding_snake = encoding_name_to_snake(encoding.name());
+            if encoding_class.name == "icelandic" {
+                encoding_snake.push_str("_icelandic");
+            }
             let letter_boundary = find_letter_boundary(encoding_class);
             writer
                 .write_fmt(format_args!(
@@ -1566,7 +1609,10 @@ impl PartialEq for SingleByteData {
     let mut i = 0;
     for encoding_class in ENCODING_CLASSES.iter() {
         for encoding in encoding_class.encodings {
-            let upper = encoding_name_to_constant(encoding.name());
+            let mut upper = encoding_name_to_constant(encoding.name());
+            if encoding_class.name == "icelandic" {
+                upper.push_str("_ICELANDIC");
+            }
             writer
                 .write_fmt(format_args!("pub const {}_INDEX: usize = {};\n", upper, i))
                 .unwrap();
