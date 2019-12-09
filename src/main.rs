@@ -21,6 +21,7 @@ use encoding_rs::EUC_KR_INIT;
 use encoding_rs::GBK;
 use encoding_rs::GBK_INIT;
 use encoding_rs::IBM866_INIT;
+use encoding_rs::ISO_8859_13_INIT;
 use encoding_rs::ISO_8859_2_INIT;
 use encoding_rs::ISO_8859_4_INIT;
 use encoding_rs::ISO_8859_5_INIT;
@@ -265,7 +266,7 @@ static ENCODING_CLASSES: [EncodingClass; 11] = [
     EncodingClass {
         char_classes: &CENTRAL,
         encodings: &[&WINDOWS_1250_INIT, &ISO_8859_2_INIT],
-        languages: &["pl", "hu", "sh", "cs", "ro", "sk", "hr", "sl", "bs", "sq"],
+        languages: &["pl", "hu", "sh", "cs", "ro", "sk", "hr", "sl", "bs"],
         name: "central",
         space_divisor: 1.0,
         multiplier: 1.0,
@@ -286,14 +287,17 @@ static ENCODING_CLASSES: [EncodingClass; 11] = [
         space_divisor: 1.0,
         multiplier: 1.0,
     },
-    // XXX Icelandic "is", "fo"
     EncodingClass {
         char_classes: &WESTERN,
         encodings: &[&WINDOWS_1252_INIT],
-        // Intentionally omitting ASCII or almost-ASCII languages like en, nl, id, so, sw, various Malay-alphabet languages
+        // Intentionally omitting ASCII or almost-ASCII languages like en, nl, id, so, sw, various Malay-alphabet languages.
+        // Per https://web.archive.org/web/20170916200715/http://www.microsoft.com/resources/msdn/goglobal/default.mspx
+        // Albanian got windows-1250 from Microsoft, but it the characters overlap windows-1252, and the Google stats
+        // say windows-1252. By putting Albanian here, it doesn't introduce misdetections between windows-1252 and
+        // windows-1250.
         languages: &[
             "sv", "de", "fr", "it", "es", "pt", "ca", "no", "fi", "eu", "da", "gl", "nn", "oc",
-            "br", "lb", "ht", "ga", "an", "wa", "gd", "li",
+            "br", "lb", "ht", "ga", "an", "wa", "gd", "li", "sq"
         ],
         name: "western",
         space_divisor: 0.0,
@@ -342,7 +346,7 @@ static ENCODING_CLASSES: [EncodingClass; 11] = [
     },
     EncodingClass {
         char_classes: &BALTIC,
-        encodings: &[&WINDOWS_1257_INIT, &ISO_8859_4_INIT],
+        encodings: &[&WINDOWS_1257_INIT, &ISO_8859_13_INIT, &ISO_8859_4_INIT],
         languages: &["lt", "et", "lv"],
         name: "baltic",
         space_divisor: 1.0,
@@ -1290,9 +1294,9 @@ use encoding_rs::ISO_8859_8_INIT;
 use encoding_rs::WINDOWS_1256_INIT;
 use encoding_rs::ISO_8859_6_INIT;
 use encoding_rs::WINDOWS_1257_INIT;
+use encoding_rs::ISO_8859_13_INIT;
 use encoding_rs::ISO_8859_4_INIT;
 use encoding_rs::WINDOWS_874_INIT;
-use super::LATIN_ADJACENCY_PENALTY;
 use super::IMPLAUSIBILITY_PENALTY;
 
 ",
@@ -1559,7 +1563,7 @@ impl PartialEq for SingleByteData {
         .unwrap();
 
     writer
-        .write_all(b"pub static SINGLE_BYTE_DATA: [SingleByteData; 19] = [\n")
+        .write_all(b"pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [\n")
         .unwrap();
 
     for encoding_class in ENCODING_CLASSES.iter() {
