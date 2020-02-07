@@ -294,10 +294,11 @@ static ENCODING_CLASSES: [EncodingClass; 11] = [
         // Per https://web.archive.org/web/20170916200715/http://www.microsoft.com/resources/msdn/goglobal/default.mspx
         // Albanian got windows-1250 from Microsoft, but it the characters overlap windows-1252, and the Google stats
         // say windows-1252. By putting Albanian here, it doesn't introduce misdetections between windows-1252 and
-        // windows-1250.
+        // windows-1250. Putting Estonian here avoids diluting the Baltic model with traits shared with German, Swedish,
+        // Finnish, and Portuguese.
         languages: &[
             "sv", "de", "fr", "it", "es", "pt", "ca", "no", "fi", "eu", "da", "gl", "nn", "oc",
-            "br", "lb", "ht", "ga", "an", "wa", "gd", "li", "sq"
+            "br", "lb", "ht", "ga", "an", "wa", "gd", "li", "sq", "et"
         ],
         name: "western",
         space_divisor: 0.0,
@@ -347,7 +348,7 @@ static ENCODING_CLASSES: [EncodingClass; 11] = [
     EncodingClass {
         char_classes: &BALTIC,
         encodings: &[&WINDOWS_1257_INIT, &ISO_8859_13_INIT, &ISO_8859_4_INIT],
-        languages: &["lt", "et", "lv"],
+        languages: &["lt", "lv"],
         name: "baltic",
         space_divisor: 1.0,
         multiplier: 1.0,
