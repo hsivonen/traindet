@@ -294,11 +294,13 @@ static ENCODING_CLASSES: [EncodingClass; 11] = [
         // Per https://web.archive.org/web/20170916200715/http://www.microsoft.com/resources/msdn/goglobal/default.mspx
         // Albanian got windows-1250 from Microsoft, but it the characters overlap windows-1252, and the Google stats
         // say windows-1252. By putting Albanian here, it doesn't introduce misdetections between windows-1252 and
-        // windows-1250. Putting Estonian here avoids diluting the Baltic model with traits shared with German, Swedish,
-        // Finnish, and Portuguese.
+        // windows-1250.
+        // Estonian gets windows-1257 on Windows. However, glibc and Solaris 2.6 had Estonian as an ISO-8859-1 locale.
+        // Putting Estonian here avoids diluting the Baltic model with traits shared with German, Swedish, Finnish, and
+        // Portuguese. In practice, Estonian itself gains significantly in detection accuracy by being in this model.
         languages: &[
             "sv", "de", "fr", "it", "es", "pt", "ca", "no", "fi", "eu", "da", "gl", "nn", "oc",
-            "br", "lb", "ht", "ga", "an", "wa", "gd", "li", "sq", "et"
+            "br", "lb", "ht", "ga", "an", "wa", "gd", "li", "sq", "et",
         ],
         name: "western",
         space_divisor: 0.0,
