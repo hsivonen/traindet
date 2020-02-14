@@ -7,13 +7,15 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use encoding_rs::IBM866;
+use encoding_rs::WINDOWS_1253;
 use bzip2::bufread::BzDecoder;
 use detector_char_classes::*;
 use detone::IterDecomposeVietnamese;
 use encoding_rs::DecoderResult;
 use encoding_rs::Encoding;
 use encoding_rs::BIG5;
-use encoding_rs::BIG5_INIT;
+
 use encoding_rs::EUC_JP;
 use encoding_rs::EUC_JP_INIT;
 use encoding_rs::EUC_KR;
@@ -27,7 +29,7 @@ use encoding_rs::ISO_8859_4_INIT;
 use encoding_rs::ISO_8859_5_INIT;
 use encoding_rs::ISO_8859_6_INIT;
 use encoding_rs::ISO_8859_7_INIT;
-use encoding_rs::ISO_8859_8;
+
 use encoding_rs::ISO_8859_8_INIT;
 use encoding_rs::KOI8_U_INIT;
 use encoding_rs::WINDOWS_1251;
@@ -49,7 +51,7 @@ use encoding_rs::WINDOWS_1256_INIT;
 use encoding_rs::WINDOWS_1257_INIT;
 use encoding_rs::WINDOWS_1258;
 use encoding_rs::WINDOWS_1258_INIT;
-use encoding_rs::WINDOWS_874;
+
 use encoding_rs::WINDOWS_874_INIT;
 use rayon::prelude::*;
 use std::fs::File;
@@ -1424,9 +1426,25 @@ use super::IMPLAUSIBILITY_PENALTY;
             }
             writer.write_all(b": [\n").unwrap();
 
+            let mut upper_table = generate_upper_table(encoding_class.char_classes, encoding);
+            if *encoding == WINDOWS_1253 || *encoding == WINDOWS_1257 {
+                // The corresponding ISO encodings map curly quotes. They
+                // are classified as non-space-like to avoid misdetection.
+                // Classify them as space-like for the Windows encoding to
+                // avoid introducing differences between other Windows
+                // encodings.
+                upper_table[0x11] = 0;
+                upper_table[0x12] = 0;
+                upper_table[0x13] = 0;
+                upper_table[0x14] = 0;
+                upper_table[0x04] = 0;
+            } else if *encoding == IBM866 {
+                // Override class for no-break-space
+                upper_table[127] = 3;
+            }
             write_class_mapping_table(
                 &mut writer,
-                &generate_upper_table(encoding_class.char_classes, encoding),
+                &upper_table,
             );
 
             writer.write_all(b"    ],\n").unwrap();
