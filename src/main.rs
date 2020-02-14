@@ -305,7 +305,7 @@ static ENCODING_CLASSES: [EncodingClass; 11] = [
             "br", "lb", "ht", "ga", "an", "wa", "gd", "li", "sq", "et",
         ],
         name: "western",
-        space_divisor: 0.0,
+        space_divisor: 1.0,
         multiplier: 1.0,
     },
     EncodingClass {
@@ -314,7 +314,7 @@ static ENCODING_CLASSES: [EncodingClass; 11] = [
         // Intentionally omitting ASCII or almost-ASCII languages like en, nl, id, so, sw, various Malay-alphabet languages
         languages: &["is", "fo"],
         name: "icelandic",
-        space_divisor: 0.0,
+        space_divisor: 1.0,
         multiplier: 1.0,
     },
     EncodingClass {
