@@ -1332,7 +1332,6 @@ use super::IMPLAUSIBILITY_PENALTY;
     writer
         .write_all(b"    turkish_ascii: [u8; 128],\n")
         .unwrap();
-    writer.write_all(b"    hebrew_ascii: [u8; 128],\n").unwrap();
     for encoding_class in ENCODING_CLASSES.iter() {
         for encoding in encoding_class.encodings {
             writer.write_all(b"    ").unwrap();
@@ -1400,16 +1399,6 @@ use super::IMPLAUSIBILITY_PENALTY;
         &mut writer,
         &generate_ascii_table(turkish.char_classes, turkish.encodings[0]),
     );
-
-    writer.write_all(b"    ],\n").unwrap();
-
-    // ---
-
-    writer.write_all(b"    hebrew_ascii: [\n").unwrap();
-
-    let hebrew = encoding_class_by_encoding(WINDOWS_1255);
-    let hebrew_ascii = generate_ascii_table(hebrew.char_classes, hebrew.encodings[0]);
-    write_class_mapping_table(&mut writer, &hebrew_ascii);
 
     writer.write_all(b"    ],\n").unwrap();
 
@@ -1591,9 +1580,7 @@ impl PartialEq for SingleByteData {
         let class_upper = encoding_class.name.to_ascii_uppercase();
         for encoding in encoding_class.encodings {
             let windows_encoding = encoding_class.encodings[0];
-            let lower = if windows_encoding == WINDOWS_1255 {
-                "hebrew_ascii"
-            } else if windows_encoding == WINDOWS_1252 || windows_encoding == WINDOWS_1250 {
+            let lower = if windows_encoding == WINDOWS_1252 || windows_encoding == WINDOWS_1250 {
                 "latin_ascii"
             } else if windows_encoding == WINDOWS_1254 {
                 "turkish_ascii"
