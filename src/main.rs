@@ -7,14 +7,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use encoding_rs::IBM866;
-use encoding_rs::WINDOWS_1253;
 use bzip2::bufread::BzDecoder;
 use detector_char_classes::*;
 use detone::IterDecomposeVietnamese;
 use encoding_rs::DecoderResult;
 use encoding_rs::Encoding;
 use encoding_rs::BIG5;
+use encoding_rs::IBM866;
+use encoding_rs::WINDOWS_1253;
 
 use encoding_rs::EUC_JP;
 use encoding_rs::EUC_JP_INIT;
@@ -1431,10 +1431,7 @@ use super::IMPLAUSIBILITY_PENALTY;
                 // Override class for no-break-space
                 upper_table[127] = 3;
             }
-            write_class_mapping_table(
-                &mut writer,
-                &upper_table,
-            );
+            write_class_mapping_table(&mut writer, &upper_table);
 
             writer.write_all(b"    ],\n").unwrap();
         }
@@ -1580,10 +1577,10 @@ impl PartialEq for SingleByteData {
         let class_upper = encoding_class.name.to_ascii_uppercase();
         for encoding in encoding_class.encodings {
             let windows_encoding = encoding_class.encodings[0];
-            let lower = if windows_encoding == WINDOWS_1252 || windows_encoding == WINDOWS_1250 {
-                "latin_ascii"
-            } else if windows_encoding == WINDOWS_1254 {
+            let lower = if windows_encoding == WINDOWS_1254 {
                 "turkish_ascii"
+            } else if is_latin(windows_encoding) {
+                "latin_ascii"
             } else {
                 "non_latin_ascii"
             };
