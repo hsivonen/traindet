@@ -474,7 +474,7 @@ fn merge(language_scores: Vec<Vec<f64>>) -> Vec<f64> {
     for vec in iter {
         assert_eq!(ret.len(), vec.len());
         for (r, v) in ret.iter_mut().zip(vec.into_iter()) {
-            *r = f64::max(*r, v);
+            *r = f64::max(*r, v); // Handles NaNs suitably
         }
     }
     ret
