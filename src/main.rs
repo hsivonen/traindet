@@ -457,7 +457,20 @@ fn multiply(scores: &mut Vec<f64>, factor: f64) {
     }
 }
 
-fn thai_multiplier(class: usize, first: usize, gb_numbers: usize, hiragana_lead: usize, greek_and_parentheses: usize, cyrillic: usize, pinyin: usize, level1_start: usize, after_hangul: usize, after_gb_level1: usize, windows_lower_start: usize, obsolete: usize) -> f64 {
+fn thai_multiplier(
+    class: usize,
+    first: usize,
+    gb_numbers: usize,
+    hiragana_lead: usize,
+    greek_and_parentheses: usize,
+    cyrillic: usize,
+    pinyin: usize,
+    level1_start: usize,
+    after_hangul: usize,
+    after_gb_level1: usize,
+    windows_lower_start: usize,
+    obsolete: usize,
+) -> f64 {
     if class == first {
         2.0 // Overlaps Chinese and Japanese punctuation
     } else if class == gb_numbers {
@@ -494,7 +507,7 @@ fn boost_thai(
 ) {
     let map = CharMap::new(classes, windows_encoding);
     let first = usize::from(map.get('ก'));
-    let gb_numbers = usize::from(map.get('ข'));   
+    let gb_numbers = usize::from(map.get('ข'));
     let hiragana_lead = usize::from(map.get('ค'));
     let greek_and_parentheses = usize::from(map.get('ฆ'));
     let cyrillic = usize::from(map.get('ง'));
@@ -507,7 +520,35 @@ fn boost_thai(
     for i in first..=obsolete {
         for j in first..=obsolete {
             let index = compute_index(i, j, ascii_classes, non_ascii_classes).unwrap();
-            scores[index] = scores[index] * thai_multiplier(i, first, gb_numbers, hiragana_lead, greek_and_parentheses, cyrillic, pinyin, level1_start, after_hangul, after_gb_level1, windows_lower_start, obsolete) * thai_multiplier(j, first, gb_numbers, hiragana_lead, greek_and_parentheses, cyrillic, pinyin, level1_start, after_hangul, after_gb_level1, windows_lower_start, obsolete);
+            scores[index] = scores[index]
+                * thai_multiplier(
+                    i,
+                    first,
+                    gb_numbers,
+                    hiragana_lead,
+                    greek_and_parentheses,
+                    cyrillic,
+                    pinyin,
+                    level1_start,
+                    after_hangul,
+                    after_gb_level1,
+                    windows_lower_start,
+                    obsolete,
+                )
+                * thai_multiplier(
+                    j,
+                    first,
+                    gb_numbers,
+                    hiragana_lead,
+                    greek_and_parentheses,
+                    cyrillic,
+                    pinyin,
+                    level1_start,
+                    after_hangul,
+                    after_gb_level1,
+                    windows_lower_start,
+                    obsolete,
+                );
         }
     }
 }
