@@ -123,10 +123,9 @@ impl CharMap {
 struct EncodingClass {
     char_classes: &'static [&'static [char]],
     encodings: &'static [&'static Encoding],
-    languages: &'static [&'static str],
+    languages: &'static [(&'static str, f64)],
     name: &'static str,
     space_divisor: f64,
-    multiplier: f64,
 }
 
 impl EncodingClass {
@@ -137,7 +136,7 @@ impl EncodingClass {
 
         let (ascii_classes, non_ascii_classes) = count_ascii_classes(self.char_classes);
 
-        self.languages.par_iter().for_each(|lang| {
+        self.languages.par_iter().for_each(|(lang, _)| {
             eprintln!("Counting {:?}", lang);
             let corpus = find_file(dir, lang);
             let scores = count_one(
@@ -177,7 +176,7 @@ impl EncodingClass {
         let language_scores = self
             .languages
             .iter()
-            .map(|lang| {
+            .map(|(lang, multiplier)| {
                 eprintln!("Training {:?}", lang);
                 let count_path = gen_count_path(dir, lang, false);
                 let mut scores = load_one(&count_path);
@@ -199,7 +198,7 @@ impl EncodingClass {
                         windows_encoding,
                     );
                 } else {
-                    multiply(&mut scores, self.multiplier);
+                    multiply(&mut scores, *multiplier);
                 }
 
                 if windows_encoding == WINDOWS_1256 {
@@ -270,18 +269,26 @@ static ENCODING_CLASSES: [EncodingClass; 11] = [
     EncodingClass {
         char_classes: &VIETNAMESE,
         encodings: &[&WINDOWS_1258_INIT],
-        languages: &["vi"],
+        languages: &[("vi", 1.0)],
         name: "vietnamese",
         space_divisor: 1.0,
-        multiplier: 1.0,
     },
     EncodingClass {
         char_classes: &CENTRAL,
         encodings: &[&WINDOWS_1250_INIT, &ISO_8859_2_INIT],
-        languages: &["pl", "hu", "sh", "cs", "ro", "sk", "hr", "sl", "bs"],
+        languages: &[
+            ("pl", 1.0),
+            ("hu", 1.0),
+            ("sh", 1.0),
+            ("cs", 1.0),
+            ("ro", 1.0),
+            ("sk", 1.0),
+            ("hr", 1.0),
+            ("sl", 1.0),
+            ("bs", 1.0),
+        ],
         name: "central",
         space_divisor: 1.0,
-        multiplier: 1.0,
     },
     EncodingClass {
         char_classes: &CYRILLIC,
@@ -294,10 +301,18 @@ static ENCODING_CLASSES: [EncodingClass; 11] = [
         ],
         // kk, tt, tg, and os don't fit
         // mn uses mapping to uk letters
-        languages: &["ru", "uk", "sr", "bg", "ce", "be", "mk", "mn"],
+        languages: &[
+            ("ru", 1.0),
+            ("uk", 1.0),
+            ("sr", 1.0),
+            ("bg", 1.0),
+            ("ce", 1.0),
+            ("be", 1.0),
+            ("mk", 1.0),
+            ("mn", 1.0),
+        ],
         name: "cyrillic",
         space_divisor: 1.0,
-        multiplier: 1.0,
     },
     EncodingClass {
         char_classes: &WESTERN,
@@ -311,69 +326,83 @@ static ENCODING_CLASSES: [EncodingClass; 11] = [
         // Putting Estonian here avoids diluting the Baltic model with traits shared with German, Swedish, Finnish, and
         // Portuguese. In practice, Estonian itself gains significantly in detection accuracy by being in this model.
         languages: &[
-            "sv", "de", "fr", "it", "es", "pt", "ca", "no", "fi", "eu", "da", "gl", "nn", "oc",
-            "br", "lb", "ht", "ga", "an", "wa", "gd", "li", "sq", "et",
+            ("sv", 1.0),
+            ("de", 1.0),
+            ("fr", 1.0),
+            ("it", 1.0),
+            ("es", 1.0),
+            ("pt", 1.0),
+            ("ca", 1.0),
+            ("no", 1.0),
+            ("fi", 1.0),
+            ("eu", 1.0),
+            ("da", 1.0),
+            ("gl", 1.0),
+            ("nn", 1.0),
+            ("oc", 1.0),
+            ("br", 1.0),
+            ("lb", 1.0),
+            ("ht", 1.0),
+            ("ga", 1.0),
+            ("an", 1.0),
+            ("wa", 1.0),
+            ("gd", 1.0),
+            ("li", 1.0),
+            ("sq", 1.0),
+            ("et", 1.0),
         ],
         name: "western",
         space_divisor: 1.0,
-        multiplier: 1.0,
     },
     EncodingClass {
         char_classes: &ICELANDIC,
         encodings: &[&WINDOWS_1252_INIT],
         // Intentionally omitting ASCII or almost-ASCII languages like en, nl, id, so, sw, various Malay-alphabet languages
-        languages: &["is", "fo"],
+        languages: &[("is", 1.0), ("fo", 1.0)],
         name: "icelandic",
         space_divisor: 1.0,
-        multiplier: 1.0,
     },
     EncodingClass {
         char_classes: &GREEK,
         encodings: &[&WINDOWS_1253_INIT, &ISO_8859_7_INIT],
-        languages: &["el"],
+        languages: &[("el", 1.3)],
         name: "greek",
         space_divisor: 1.0,
-        multiplier: 1.3,
     },
     EncodingClass {
         char_classes: &TURKISH,
         encodings: &[&WINDOWS_1254_INIT],
-        languages: &["tr", "az", "ku"],
+        languages: &[("tr", 1.8), ("az", 1.8), ("ku", 1.8)],
         name: "turkish",
         space_divisor: 1.0,
-        multiplier: 1.8,
     },
     EncodingClass {
         char_classes: &HEBREW,
         encodings: &[&WINDOWS_1255_INIT, &ISO_8859_8_INIT],
-        languages: &["he", "yi"],
+        languages: &[("he", 2.0), ("yi", 2.0)],
         name: "hebrew",
         space_divisor: 1.0,
-        multiplier: 2.0,
     },
     EncodingClass {
         char_classes: &ARABIC,
         encodings: &[&WINDOWS_1256_INIT, &ISO_8859_6_INIT],
-        languages: &["ar", "fa", "ur"],
+        languages: &[("ar", 1.0), ("fa", 1.0), ("ur", 1.0)],
         name: "arabic",
         space_divisor: 1.0,
-        multiplier: 1.0,
     },
     EncodingClass {
         char_classes: &BALTIC,
         encodings: &[&WINDOWS_1257_INIT, &ISO_8859_13_INIT, &ISO_8859_4_INIT],
-        languages: &["lt", "lv"],
+        languages: &[("lt", 1.0), ("lv", 1.0)],
         name: "baltic",
         space_divisor: 1.0,
-        multiplier: 1.0,
     },
     EncodingClass {
         char_classes: &THAI,
         encodings: &[&WINDOWS_874_INIT],
-        languages: &["th"],
+        languages: &[("th", 1.0)],
         name: "thai",
         space_divisor: 1.0,
-        multiplier: 1.0, // ignored
     },
 ];
 
@@ -1824,7 +1853,7 @@ fn download_corpus(dir: &Path) {
     curl.arg("-L");
     curl.arg("--remote-name-all");
     for encoding_class in ENCODING_CLASSES.iter() {
-        for lang in encoding_class.languages.iter() {
+        for (lang, _) in encoding_class.languages.iter() {
             let mut url = String::new();
             url.push_str(prefix);
             url.push_str(lang);
