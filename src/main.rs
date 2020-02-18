@@ -51,7 +51,7 @@ use encoding_rs::WINDOWS_1256_INIT;
 use encoding_rs::WINDOWS_1257_INIT;
 use encoding_rs::WINDOWS_1258;
 use encoding_rs::WINDOWS_1258_INIT;
-
+use encoding_rs::WINDOWS_874;
 use encoding_rs::WINDOWS_874_INIT;
 use rayon::prelude::*;
 use std::fs::File;
@@ -190,7 +190,17 @@ impl EncodingClass {
                     self.space_divisor,
                 );
 
-                multiply(&mut scores, self.multiplier);
+                if windows_encoding == WINDOWS_874 {
+                    boost_thai(
+                        &mut scores,
+                        self.char_classes,
+                        ascii_classes,
+                        non_ascii_classes,
+                        windows_encoding,
+                    );
+                } else {
+                    multiply(&mut scores, self.multiplier);
+                }
 
                 if windows_encoding == WINDOWS_1256 {
                     // Some letter pairs in Arabic get such high
@@ -363,7 +373,7 @@ static ENCODING_CLASSES: [EncodingClass; 11] = [
         languages: &["th"],
         name: "thai",
         space_divisor: 1.0,
-        multiplier: 1.7,
+        multiplier: 1.0, // ignored
     },
 ];
 
@@ -447,30 +457,85 @@ fn multiply(scores: &mut Vec<f64>, factor: f64) {
     }
 }
 
-fn clamp(
+fn thai_multiplier(class: usize, first: usize, gb_numbers: usize, hiragana_lead: usize, greek_and_parentheses: usize, cyrillic: usize, pinyin: usize, level1_start: usize, after_hangul: usize, after_gb_level1: usize, windows_lower_start: usize, obsolete: usize) -> f64 {
+    if class == first {
+        2.0 // Overlaps Chinese and Japanese punctuation
+    } else if class == gb_numbers {
+        5.0 // Overlaps GB numbers
+    } else if class == hiragana_lead {
+        9.5 // Overlaps Hiragana
+    } else if class == greek_and_parentheses {
+        9.0 // Overlaps GB/JIS Greek and Chinese parentheses
+    } else if class == cyrillic {
+        8.0 // Overlaps GB/JIS Cyrillic
+    } else if class == pinyin {
+        5.0 // Overlaps Pinyin
+    } else if class < level1_start {
+        10.0 // Overlaps box drawing and private use
+    } else if class < after_hangul {
+        2.0 // Overlaps GB Level 1 Hanzi, EUC-JP Level 1 Kanji, and Hangul
+    } else if class < after_gb_level1 {
+        2.6 // Overlaps GB Level 1 Hanzi, EUC-JP Level 1 Kanji
+    } else if class < windows_lower_start {
+        7.0 // Overlaps Windows upper case but not the above
+    } else if class == obsolete {
+        1.3 // Overlaps Katakana
+    } else {
+        7.0 // Overlaps Windows lower case
+    }
+}
+
+fn boost_thai(
     scores: &mut Vec<f64>,
     classes: &'static [&'static [char]],
     ascii_classes: usize,
     non_ascii_classes: usize,
     windows_encoding: &'static Encoding,
-    first_reference: char,
-    second_reference: char,
 ) {
     let map = CharMap::new(classes, windows_encoding);
-    let index = compute_index(
-        map.get(first_reference) as usize,
-        map.get(second_reference) as usize,
-        ascii_classes,
-        non_ascii_classes,
-    )
-    .unwrap();
-    let cutoff = scores[index];
-    for score in scores.iter_mut() {
-        if *score > cutoff {
-            *score = cutoff;
+    let first = usize::from(map.get('ก'));
+    let gb_numbers = usize::from(map.get('ข'));   
+    let hiragana_lead = usize::from(map.get('ค'));
+    let greek_and_parentheses = usize::from(map.get('ฆ'));
+    let cyrillic = usize::from(map.get('ง'));
+    let pinyin = usize::from(map.get('จ'));
+    let level1_start = usize::from(map.get('ฐ'));
+    let after_hangul = usize::from(map.get('ษ'));
+    let after_gb_level1 = usize::from(map.get('ุ'));
+    let windows_lower_start = usize::from(map.get('เ'));
+    let obsolete = usize::from(map.get('ๅ'));
+    for i in first..=obsolete {
+        for j in first..=obsolete {
+            let index = compute_index(i, j, ascii_classes, non_ascii_classes).unwrap();
+            scores[index] = scores[index] * thai_multiplier(i, first, gb_numbers, hiragana_lead, greek_and_parentheses, cyrillic, pinyin, level1_start, after_hangul, after_gb_level1, windows_lower_start, obsolete) * thai_multiplier(j, first, gb_numbers, hiragana_lead, greek_and_parentheses, cyrillic, pinyin, level1_start, after_hangul, after_gb_level1, windows_lower_start, obsolete);
         }
     }
 }
+
+// fn clamp(
+//     scores: &mut Vec<f64>,
+//     classes: &'static [&'static [char]],
+//     ascii_classes: usize,
+//     non_ascii_classes: usize,
+//     windows_encoding: &'static Encoding,
+//     first_reference: char,
+//     second_reference: char,
+// ) {
+//     let map = CharMap::new(classes, windows_encoding);
+//     let index = compute_index(
+//         map.get(first_reference) as usize,
+//         map.get(second_reference) as usize,
+//         ascii_classes,
+//         non_ascii_classes,
+//     )
+//     .unwrap();
+//     let cutoff = scores[index];
+//     for score in scores.iter_mut() {
+//         if *score > cutoff {
+//             *score = cutoff;
+//         }
+//     }
+// }
 
 fn divide_by_class_size(
     scores: &mut Vec<f64>,
@@ -555,8 +620,8 @@ fn convert_to_floats(scores: &[u64]) -> Vec<f64> {
     let mut float_scores = Vec::with_capacity(scores.len());
     let float_total = total as f64;
     for &score in scores {
-        if score == 0 {
-            // No instances of this character pair.
+        if score < 5 {
+            // Almost no instances of this character pair.
             // Mark as implausible.
             float_scores.push(std::f64::NAN);
         } else {
