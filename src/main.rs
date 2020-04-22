@@ -64,6 +64,10 @@ use std::process::Command;
 use unic_normal::StrNormalForm;
 use unicode_reader::CodePoints;
 
+const NON_STORED_CLASSES: usize = 6;
+
+const NON_STORED_CLASS_START: usize = 100;
+
 struct CharMap {
     // Highest is U+25A0 BLACK SQUARE
     arr: [u8; 9633],
@@ -881,7 +885,7 @@ fn suggest_merges(scores: &Vec<u8>, encoding_class: &'static EncodingClass) {
 
 fn find_class(c: char, char_classes: &'static [&'static [char]]) -> Option<usize> {
     for (i, chars) in char_classes.iter().enumerate() {
-        if chars[0] == c {
+        if chars.first() == Some(&c) {
             return Some(i);
         }
     }
@@ -899,7 +903,10 @@ fn force_implausibility_next_to_alphabetic(
 ) {
     if let Some(special) = find_class(c, char_classes) {
         for (i, chars) in char_classes.iter().enumerate() {
-            if chars[0].is_alphabetic() && (!allow_next_to_ascii || chars[0] >= '\u{80}') {
+            if !chars.is_empty()
+                && chars[0].is_alphabetic()
+                && (!allow_next_to_ascii || chars[0] >= '\u{80}')
+            {
                 let (first, second) = if implausible_after_alphabetic {
                     (i, special)
                 } else {
@@ -1116,27 +1123,29 @@ fn force_implausibility(byte_vec: &mut Vec<u8>, encoding_class: &'static Encodin
         for &tone in tones.iter() {
             let tone_class_index = find_class(tone, encoding_class.char_classes).unwrap();
             for base_class_index in 0..encoding_class.char_classes.len() {
-                match encoding_class.char_classes[base_class_index][0] {
-                    'a' | 'ă' | 'â' | 'e' | 'ê' | 'i' | 'o' | 'ô' | 'ơ' | 'u' | 'ư' | 'y' => {
-                    }
-                    ' ' => {
-                        if let Some(index) = compute_index(
-                            base_class_index,
-                            tone_class_index,
-                            ascii_classes,
-                            non_ascii_classes,
-                        ) {
-                            byte_vec[index] = 0;
+                if !encoding_class.char_classes[base_class_index].is_empty() {
+                    match encoding_class.char_classes[base_class_index][0] {
+                        'a' | 'ă' | 'â' | 'e' | 'ê' | 'i' | 'o' | 'ô' | 'ơ' | 'u' | 'ư' | 'y' =>
+                            {}
+                        ' ' => {
+                            if let Some(index) = compute_index(
+                                base_class_index,
+                                tone_class_index,
+                                ascii_classes,
+                                non_ascii_classes,
+                            ) {
+                                byte_vec[index] = 0;
+                            }
                         }
-                    }
-                    _ => {
-                        if let Some(index) = compute_index(
-                            base_class_index,
-                            tone_class_index,
-                            ascii_classes,
-                            non_ascii_classes,
-                        ) {
-                            byte_vec[index] = 255;
+                        _ => {
+                            if let Some(index) = compute_index(
+                                base_class_index,
+                                tone_class_index,
+                                ascii_classes,
+                                non_ascii_classes,
+                            ) {
+                                byte_vec[index] = 255;
+                            }
                         }
                     }
                 }
@@ -1417,27 +1426,39 @@ fn write_rs_file(
 
     writer
         .write_all(
-            b"use encoding_rs::Encoding;
-use encoding_rs::WINDOWS_1258_INIT;
-use encoding_rs::WINDOWS_1250_INIT;
-use encoding_rs::ISO_8859_2_INIT;
-use encoding_rs::WINDOWS_1251_INIT;
-use encoding_rs::KOI8_U_INIT;
-use encoding_rs::ISO_8859_5_INIT;
+            b"use super::IMPLAUSIBILITY_PENALTY;
+use encoding_rs::Encoding;
 use encoding_rs::IBM866_INIT;
+use encoding_rs::ISO_8859_13_INIT;
+use encoding_rs::ISO_8859_2_INIT;
+use encoding_rs::ISO_8859_4_INIT;
+use encoding_rs::ISO_8859_5_INIT;
+use encoding_rs::ISO_8859_6_INIT;
+use encoding_rs::ISO_8859_7_INIT;
+use encoding_rs::ISO_8859_8_INIT;
+use encoding_rs::KOI8_U_INIT;
+use encoding_rs::WINDOWS_1250_INIT;
+use encoding_rs::WINDOWS_1251_INIT;
 use encoding_rs::WINDOWS_1252_INIT;
 use encoding_rs::WINDOWS_1253_INIT;
-use encoding_rs::ISO_8859_7_INIT;
 use encoding_rs::WINDOWS_1254_INIT;
 use encoding_rs::WINDOWS_1255_INIT;
-use encoding_rs::ISO_8859_8_INIT;
 use encoding_rs::WINDOWS_1256_INIT;
-use encoding_rs::ISO_8859_6_INIT;
 use encoding_rs::WINDOWS_1257_INIT;
-use encoding_rs::ISO_8859_13_INIT;
-use encoding_rs::ISO_8859_4_INIT;
+use encoding_rs::WINDOWS_1258_INIT;
 use encoding_rs::WINDOWS_874_INIT;
-use super::IMPLAUSIBILITY_PENALTY;
+
+const PLAUSIBLE_NEXT_TO_ALPHABETIC_ON_EITHER_SIDE: usize = 0;
+
+const IMPLAUSIBLE_NEXT_TO_ALPHABETIC_ON_EITHER_SIDE: usize = 1;
+
+const IMPLAUSIBLE_BEFORE_ALPHABETIC: usize = 2;
+
+const IMPLAUSIBLE_AFTER_ALPHABETIC: usize = 3;
+
+const PLAUSIBLE_NEXT_TO_NON_ASCII_ALPHABETIC_ON_EITHER_SIDE: usize = 4;
+
+const PLAUSIBLE_NEXT_TO_ASCII_ALPHABETIC_ON_EITHER_SIDE: usize = 5;
 
 ",
         )
@@ -1670,25 +1691,100 @@ impl SingleByteData {
 
     #[inline(always)]
     pub fn is_non_latin_alphabetic(&'static self, byte: u8) -> bool {
-        return byte >= self.letter_boundary;
+        return byte >= self.letter_boundary
+            && usize::from(byte) < (self.ascii + self.non_ascii - 6);
     }
 
     #[inline(always)]
     pub fn score(&'static self, current_class: u8, previous_class: u8) -> i64 {
-        if let Some(index) = compute_index(
-            usize::from(previous_class),
-            usize::from(current_class),
-            self.ascii,
-            self.non_ascii,
-        ) {
-            let b = self.probabilities[index];
-            if b == 255 {
-                IMPLAUSIBILITY_PENALTY
+        let current_usize = usize::from(current_class);
+        let previous_usize = usize::from(previous_class);
+        let stored_boundary = self.ascii + self.non_ascii - 6;
+        if current_usize < stored_boundary {
+            if previous_usize < stored_boundary {
+                // Both below
+                if let Some(index) =
+                    compute_index(previous_usize, current_usize, self.ascii, self.non_ascii)
+                {
+                    let b = self.probabilities[index];
+                    if b == 255 {
+                        IMPLAUSIBILITY_PENALTY
+                    } else {
+                        i64::from(b)
+                    }
+                } else {
+                    0
+                }
             } else {
-                i64::from(b)
+                // Current below stored, prev above
+                if current_usize == 0 {
+                    // Current is space-like
+                    0
+                } else {
+                    // Current is alphabetic
+                    let previous_unstored = previous_usize - stored_boundary;
+                    match previous_unstored {
+                        PLAUSIBLE_NEXT_TO_ALPHABETIC_ON_EITHER_SIDE => 0,
+                        IMPLAUSIBLE_NEXT_TO_ALPHABETIC_ON_EITHER_SIDE => IMPLAUSIBILITY_PENALTY,
+                        IMPLAUSIBLE_BEFORE_ALPHABETIC => IMPLAUSIBILITY_PENALTY,
+                        IMPLAUSIBLE_AFTER_ALPHABETIC => 0,
+                        PLAUSIBLE_NEXT_TO_NON_ASCII_ALPHABETIC_ON_EITHER_SIDE => {
+                            if current_usize < self.ascii {
+                                IMPLAUSIBILITY_PENALTY
+                            } else {
+                                0
+                            }
+                        }
+                        PLAUSIBLE_NEXT_TO_ASCII_ALPHABETIC_ON_EITHER_SIDE => {
+                            if current_usize < self.ascii {
+                                0
+                            } else {
+                                IMPLAUSIBILITY_PENALTY
+                            }
+                        }
+                        _ => {
+                            unreachable!();
+                        }
+                    }
+                }
             }
         } else {
-            0
+            if previous_usize < stored_boundary {
+                // Current above, prev below
+                if previous_usize == 0 {
+                    // Previous is space-like
+                    0
+                } else {
+                    // Current is alphabetic
+                    let current_unstored = current_usize - stored_boundary;
+                    match current_unstored {
+                        PLAUSIBLE_NEXT_TO_ALPHABETIC_ON_EITHER_SIDE => 0,
+                        IMPLAUSIBLE_NEXT_TO_ALPHABETIC_ON_EITHER_SIDE => IMPLAUSIBILITY_PENALTY,
+                        IMPLAUSIBLE_BEFORE_ALPHABETIC => 0,
+                        IMPLAUSIBLE_AFTER_ALPHABETIC => IMPLAUSIBILITY_PENALTY,
+                        PLAUSIBLE_NEXT_TO_NON_ASCII_ALPHABETIC_ON_EITHER_SIDE => {
+                            if previous_usize < self.ascii {
+                                IMPLAUSIBILITY_PENALTY
+                            } else {
+                                0
+                            }
+                        }
+                        PLAUSIBLE_NEXT_TO_ASCII_ALPHABETIC_ON_EITHER_SIDE => {
+                            if previous_usize < self.ascii {
+                                0
+                            } else {
+                                IMPLAUSIBILITY_PENALTY
+                            }
+                        }
+                        _ => {
+                            unreachable!();
+                        }
+                    }
+                }
+            } else {
+                // Both above
+                IMPLAUSIBILITY_PENALTY
+            }
         }
     }
 }
@@ -1821,14 +1917,28 @@ fn write_probability_table(
         }
         writer.write_all(b" // ").unwrap();
         writer
-            .write_fmt(format_args!("{},", char_classes[row][0]))
+            .write_fmt(format_args!(
+                "{},",
+                if char_classes[row].is_empty() {
+                    ' '
+                } else {
+                    char_classes[row][0]
+                }
+            ))
             .unwrap();
         writer.write_all(b"\n").unwrap();
     }
     writer.write_all(b"      //").unwrap();
     for column in 0..side {
         writer
-            .write_fmt(format_args!("  {},", char_classes[column][0]))
+            .write_fmt(format_args!(
+                "  {},",
+                if char_classes[column].is_empty() {
+                    ' '
+                } else {
+                    char_classes[column][0]
+                }
+            ))
             .unwrap();
     }
     writer.write_all(b"\n").unwrap();
