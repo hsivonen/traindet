@@ -392,7 +392,7 @@ static ENCODING_CLASSES: [EncodingClass; 11] = [
         encodings: &[&WINDOWS_1256_INIT, &ISO_8859_6_INIT],
         languages: &[("ar", 1.0), ("fa", 1.0), ("ur", 1.0)],
         name: "arabic",
-        space_divisor: 1.0,
+        space_divisor: 0.90,
     },
     EncodingClass {
         char_classes: &BALTIC,
@@ -463,7 +463,10 @@ fn count_ascii_classes(char_classes: &'static [&'static [char]]) -> (usize, usiz
         .map(|c| c[0])
         .take_while(|c| *c < '\u{80}')
         .count();
-    (ascii_classes, char_classes.len() - ascii_classes)
+    (
+        ascii_classes,
+        char_classes.len() - ascii_classes - NON_STORED_CLASSES,
+    )
 }
 
 fn open_bzip2(path: &Path) -> impl Iterator<Item = char> {
@@ -655,6 +658,9 @@ fn compute_index(
     if x < ascii_classes && y < ascii_classes {
         return None;
     }
+    if x >= ascii_classes + non_ascii_classes || y >= ascii_classes + non_ascii_classes {
+        return None;
+    }
     if y >= ascii_classes {
         return Some(
             (ascii_classes * non_ascii_classes)
@@ -816,33 +822,6 @@ fn further_than_epsilon(a: u8, b: u8, e: u8) -> bool {
     delta > e
 }
 
-/// Finds the first class _after_ letters for Latin and the first
-/// non-Latin letter class for non-Latin.
-fn find_letter_boundary(encoding_class: &'static EncodingClass) -> u8 {
-    if is_latin(encoding_class.encodings[0]) {
-        for (i, chars) in encoding_class.char_classes.iter().enumerate() {
-            let first = chars[0];
-            if first == ' ' || first == '0' || first == 'a' {
-                continue;
-            }
-            if !first.is_alphabetic() {
-                return i as u8;
-            }
-        }
-    } else {
-        for (i, chars) in encoding_class.char_classes.iter().enumerate() {
-            let first = chars[0];
-            if first == ' ' || first == '0' || first == 'a' {
-                continue;
-            }
-            if first.is_alphabetic() {
-                return i as u8;
-            }
-        }
-    }
-    encoding_class.char_classes.len() as u8
-}
-
 fn suggest_merges(scores: &Vec<u8>, encoding_class: &'static EncodingClass) {
     let (ascii_classes, non_ascii_classes) = count_ascii_classes(encoding_class.char_classes);
     for e in 0..1 {
@@ -921,168 +900,10 @@ fn force_implausibility_next_to_alphabetic(
     }
 }
 
-fn force_implausibility_next_to_self(
-    c: char,
-    byte_vec: &mut Vec<u8>,
-    char_classes: &'static [&'static [char]],
-    ascii_classes: usize,
-    non_ascii_classes: usize,
-) {
-    if let Some(special) = find_class(c, char_classes) {
-        if let Some(index) = compute_index(special, special, ascii_classes, non_ascii_classes) {
-            byte_vec[index] = 255;
-        }
-    }
-}
-
 fn force_implausibility(byte_vec: &mut Vec<u8>, encoding_class: &'static EncodingClass) {
     // The use case for this stuff is primarily to avoid misdetecting windows-1250 as other Latin and to avoid misdetecting
     // Greek as Hebrew or Cyrillic.
     let (ascii_classes, non_ascii_classes) = count_ascii_classes(encoding_class.char_classes);
-    // TODO: Force implausibility next to itself
-    // '·', plus the classes below
-    // Ordinal indicators are supposed to be preceded by a digit and be followed by space.
-    force_implausibility_next_to_alphabetic(
-        'ª',
-        true,
-        byte_vec,
-        encoding_class.char_classes,
-        ascii_classes,
-        non_ascii_classes,
-        false,
-    );
-    force_implausibility_next_to_alphabetic(
-        'ª',
-        false,
-        byte_vec,
-        encoding_class.char_classes,
-        ascii_classes,
-        non_ascii_classes,
-        false,
-    );
-    force_implausibility_next_to_self(
-        'ª',
-        byte_vec,
-        encoding_class.char_classes,
-        ascii_classes,
-        non_ascii_classes,
-    );
-    // Boost after number for windows-1252
-
-    // Implausible on either side of alphabetic
-    force_implausibility_next_to_alphabetic(
-        '¨',
-        true,
-        byte_vec,
-        encoding_class.char_classes,
-        ascii_classes,
-        non_ascii_classes,
-        false,
-    );
-    force_implausibility_next_to_alphabetic(
-        '¨',
-        false,
-        byte_vec,
-        encoding_class.char_classes,
-        ascii_classes,
-        non_ascii_classes,
-        false,
-    );
-    force_implausibility_next_to_self(
-        '¨',
-        byte_vec,
-        encoding_class.char_classes,
-        ascii_classes,
-        non_ascii_classes,
-    );
-    // Implausible before alphabetic
-    force_implausibility_next_to_alphabetic(
-        '®',
-        false,
-        byte_vec,
-        encoding_class.char_classes,
-        ascii_classes,
-        non_ascii_classes,
-        false,
-    );
-    force_implausibility_next_to_self(
-        '®',
-        byte_vec,
-        encoding_class.char_classes,
-        ascii_classes,
-        non_ascii_classes,
-    );
-    // Implausible after alphabetic
-    force_implausibility_next_to_alphabetic(
-        '©',
-        true,
-        byte_vec,
-        encoding_class.char_classes,
-        ascii_classes,
-        non_ascii_classes,
-        false,
-    );
-    force_implausibility_next_to_self(
-        '©',
-        byte_vec,
-        encoding_class.char_classes,
-        ascii_classes,
-        non_ascii_classes,
-    );
-    // Implausible on either side of non-ASCII alphabetic
-    force_implausibility_next_to_alphabetic(
-        '¬',
-        true,
-        byte_vec,
-        encoding_class.char_classes,
-        ascii_classes,
-        non_ascii_classes,
-        true,
-    );
-    force_implausibility_next_to_alphabetic(
-        '¬',
-        false,
-        byte_vec,
-        encoding_class.char_classes,
-        ascii_classes,
-        non_ascii_classes,
-        true,
-    );
-    force_implausibility_next_to_self(
-        '¬',
-        byte_vec,
-        encoding_class.char_classes,
-        ascii_classes,
-        non_ascii_classes,
-    );
-    // LRM and RLM are meant to be used after a punctuation character before space. Let's mark them implausible before and after
-    // a letter. It's not technically wrong for them to appear next to a letter, but there's no need, and allowing it causes
-    // misdetections of Greek as Hebrew.
-    force_implausibility_next_to_alphabetic(
-        '\u{200E}',
-        true,
-        byte_vec,
-        encoding_class.char_classes,
-        ascii_classes,
-        non_ascii_classes,
-        false,
-    );
-    force_implausibility_next_to_alphabetic(
-        '\u{200E}',
-        false,
-        byte_vec,
-        encoding_class.char_classes,
-        ascii_classes,
-        non_ascii_classes,
-        false,
-    );
-    force_implausibility_next_to_self(
-        '\u{200E}',
-        byte_vec,
-        encoding_class.char_classes,
-        ascii_classes,
-        non_ascii_classes,
-    );
     // Final sigma
     force_implausibility_next_to_alphabetic(
         'ς',
@@ -1460,6 +1281,8 @@ const PLAUSIBLE_NEXT_TO_NON_ASCII_ALPHABETIC_ON_EITHER_SIDE: usize = 4;
 
 const PLAUSIBLE_NEXT_TO_ASCII_ALPHABETIC_ON_EITHER_SIDE: usize = 5;
 
+const WINDOWS_1256_ZWNJ: usize = 2;
+
 ",
         )
         .unwrap();
@@ -1669,7 +1492,6 @@ pub struct SingleByteData {
     probabilities: &'static [u8],
     ascii: usize,
     non_ascii: usize,
-    letter_boundary: u8,
 }
 
 impl SingleByteData {
@@ -1685,21 +1507,36 @@ impl SingleByteData {
     }
 
     #[inline(always)]
-    pub fn is_latin_alphabetic(&'static self, byte: u8) -> bool {
-        return byte >= 2 && byte < self.letter_boundary;
+    pub fn is_latin_alphabetic(&'static self, caseless_class: u8) -> bool {
+        let caseless_class_usize = usize::from(caseless_class);
+        caseless_class_usize > 0 && caseless_class_usize < (self.ascii + self.non_ascii)
     }
 
     #[inline(always)]
-    pub fn is_non_latin_alphabetic(&'static self, byte: u8) -> bool {
-        return byte >= self.letter_boundary
-            && usize::from(byte) < (self.ascii + self.non_ascii - 6);
+    pub fn is_non_latin_alphabetic(
+        &'static self,
+        caseless_class: u8,
+        is_windows_1256: bool,
+    ) -> bool {
+        let caseless_class_usize = usize::from(caseless_class);
+        let lower_bound = if is_windows_1256 {
+            WINDOWS_1256_ZWNJ
+        } else {
+            1
+        };
+        caseless_class_usize > lower_bound && caseless_class_usize < (self.ascii + self.non_ascii)
     }
 
     #[inline(always)]
-    pub fn score(&'static self, current_class: u8, previous_class: u8) -> i64 {
+    pub fn score(
+        &'static self,
+        current_class: u8,
+        previous_class: u8,
+        is_windows_1256: bool,
+    ) -> i64 {
         let current_usize = usize::from(current_class);
         let previous_usize = usize::from(previous_class);
-        let stored_boundary = self.ascii + self.non_ascii - 6;
+        let stored_boundary = self.ascii + self.non_ascii;
         if current_usize < stored_boundary {
             if previous_usize < stored_boundary {
                 // Both below
@@ -1717,7 +1554,7 @@ impl SingleByteData {
                 }
             } else {
                 // Current below stored, prev above
-                if current_usize == 0 {
+                if current_usize == 0 || (is_windows_1256 && current_usize == WINDOWS_1256_ZWNJ) {
                     // Current is space-like
                     0
                 } else {
@@ -1751,7 +1588,7 @@ impl SingleByteData {
         } else {
             if previous_usize < stored_boundary {
                 // Current above, prev below
-                if previous_usize == 0 {
+                if previous_usize == 0 || (is_windows_1256 && previous_usize == WINDOWS_1256_ZWNJ) {
                     // Previous is space-like
                     0
                 } else {
@@ -1820,7 +1657,6 @@ impl PartialEq for SingleByteData {
             if encoding_class.name == "icelandic" {
                 encoding_snake.push_str("_icelandic");
             }
-            let letter_boundary = find_letter_boundary(encoding_class);
             writer
                 .write_fmt(format_args!(
                     "    SingleByteData {{
@@ -1830,7 +1666,6 @@ impl PartialEq for SingleByteData {
         probabilities: &DETECTOR_DATA.{},
         ascii: {}_ASCII,
         non_ascii: {}_NON_ASCII,
-        letter_boundary: {},
     }},\n",
                     encoding_upper,
                     lower,
@@ -1838,7 +1673,6 @@ impl PartialEq for SingleByteData {
                     encoding_class.name,
                     class_upper,
                     class_upper,
-                    letter_boundary,
                 ))
                 .unwrap();
         }
@@ -1982,6 +1816,7 @@ fn download_corpus(dir: &Path) {
 
 fn count_pairs(dir: &Path) {
     ENCODING_CLASSES.par_iter().for_each(|c| c.count(dir));
+    // ENCODING_CLASSES.iter().for_each(|c| c.count(dir));
 }
 
 fn cjk_bounds(lang: &str) -> (usize, usize) {
