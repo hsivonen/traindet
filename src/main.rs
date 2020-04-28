@@ -33,7 +33,6 @@ use encoding_rs::ISO_8859_7_INIT;
 use encoding_rs::ISO_8859_8_INIT;
 use encoding_rs::KOI8_U_INIT;
 use encoding_rs::WINDOWS_1251;
-use encoding_rs::WINDOWS_1252;
 use encoding_rs::WINDOWS_1255;
 use encoding_rs::WINDOWS_1257;
 
@@ -65,8 +64,6 @@ use unic_normal::StrNormalForm;
 use unicode_reader::CodePoints;
 
 const NON_STORED_CLASSES: usize = 6;
-
-const NON_STORED_CLASS_START: usize = 100;
 
 struct CharMap {
     // Highest is U+25A0 BLACK SQUARE
@@ -1122,44 +1119,6 @@ fn encoding_name_to_constant(name: &str) -> String {
     under
 }
 
-fn generate_ascii_table(
-    char_classes: &'static [&'static [char]],
-    windows_encoding: &'static Encoding,
-) -> Vec<u8> {
-    let mut vec = Vec::new();
-    vec.resize(128, 0u8);
-    for (i, chars) in char_classes.iter().enumerate() {
-        let class = i as u8;
-        for &c in chars.iter() {
-            if (c as usize) < vec.len() {
-                vec[c as usize] = class;
-            }
-
-            let upper = if windows_encoding == WINDOWS_1254 && c == 'i' {
-                'İ'
-            } else if c == 'ς' {
-                // Intentionally not handling final sigma to match
-                // detection-time mapping.
-                continue;
-            } else if !c.is_lowercase() {
-                // caseless
-                continue;
-            } else {
-                let mut iter = c.to_uppercase();
-                let first = iter.next().unwrap();
-                if let Some(_) = iter.next() {
-                    continue;
-                }
-                first
-            };
-            if (upper as usize) < vec.len() {
-                vec[upper as usize] = class | 0x80;
-            }
-        }
-    }
-    vec
-}
-
 fn generate_upper_table(
     char_classes: &'static [&'static [char]],
     encoding: &'static Encoding,
@@ -1311,14 +1270,6 @@ pub enum SingleByteEncodingType {
     writer
         .write_all(b"    pub frequent_hangul: [u16; 128],\n")
         .unwrap();
-
-    writer.write_all(b"    latin_ascii: [u8; 128],\n").unwrap();
-    writer
-        .write_all(b"    non_latin_ascii: [u8; 128],\n")
-        .unwrap();
-    writer
-        .write_all(b"    turkish_ascii: [u8; 128],\n")
-        .unwrap();
     for encoding_class in ENCODING_CLASSES.iter() {
         for encoding in encoding_class.encodings {
             writer.write_all(b"    ").unwrap();
@@ -1354,40 +1305,6 @@ pub enum SingleByteEncodingType {
         write_cjk_frequency_table(&mut writer, scores);
         writer.write_all(b"    ],\n").unwrap();
     }
-
-    // ---
-
-    writer.write_all(b"    latin_ascii: [\n").unwrap();
-
-    let western = encoding_class_by_encoding(WINDOWS_1252);
-    write_class_mapping_table(
-        &mut writer,
-        &generate_ascii_table(western.char_classes, western.encodings[0]),
-    );
-
-    writer.write_all(b"    ],\n").unwrap();
-
-    // ---
-
-    writer.write_all(b"    non_latin_ascii: [\n").unwrap();
-
-    let cyrillic = encoding_class_by_encoding(WINDOWS_1251);
-    let cyrillic_ascii = generate_ascii_table(cyrillic.char_classes, cyrillic.encodings[0]);
-    write_class_mapping_table(&mut writer, &cyrillic_ascii);
-
-    writer.write_all(b"    ],\n").unwrap();
-
-    // ---
-
-    writer.write_all(b"    turkish_ascii: [\n").unwrap();
-
-    let turkish = encoding_class_by_encoding(WINDOWS_1254);
-    write_class_mapping_table(
-        &mut writer,
-        &generate_ascii_table(turkish.char_classes, turkish.encodings[0]),
-    );
-
-    writer.write_all(b"    ],\n").unwrap();
 
     // ---
 
@@ -1495,7 +1412,6 @@ fn compute_index(
 
 pub struct SingleByteData {
     pub encoding: &'static Encoding,
-    lower: &'static [u8; 128],
     upper: &'static [u8; 128],
     probabilities: &'static [u8],
     ascii: usize,
@@ -1680,14 +1596,6 @@ impl PartialEq for SingleByteData {
     for encoding_class in ENCODING_CLASSES.iter() {
         let class_upper = encoding_class.name.to_ascii_uppercase();
         for encoding in encoding_class.encodings {
-            let windows_encoding = encoding_class.encodings[0];
-            let lower = if windows_encoding == WINDOWS_1254 {
-                "turkish_ascii"
-            } else if is_latin(windows_encoding) {
-                "latin_ascii"
-            } else {
-                "non_latin_ascii"
-            };
             let encoding_upper = encoding_name_to_constant(encoding.name());
             let mut encoding_snake = encoding_name_to_snake(encoding.name());
             if encoding_class.name == "icelandic" {
@@ -1697,18 +1605,12 @@ impl PartialEq for SingleByteData {
                 .write_fmt(format_args!(
                     "    SingleByteData {{
         encoding: &{}_INIT,
-        lower: &DETECTOR_DATA.{},
         upper: &DETECTOR_DATA.{},
         probabilities: &DETECTOR_DATA.{},
         ascii: {}_ASCII,
         non_ascii: {}_NON_ASCII,
     }},\n",
-                    encoding_upper,
-                    lower,
-                    encoding_snake,
-                    encoding_class.name,
-                    class_upper,
-                    class_upper,
+                    encoding_upper, encoding_snake, encoding_class.name, class_upper, class_upper,
                 ))
                 .unwrap();
         }
@@ -1812,17 +1714,6 @@ fn write_probability_table(
             .unwrap();
     }
     writer.write_all(b"\n").unwrap();
-}
-
-fn encoding_class_by_encoding(encoding: &'static Encoding) -> &EncodingClass {
-    for encoding_class in ENCODING_CLASSES.iter() {
-        for enc in encoding_class.encodings.iter() {
-            if enc == &encoding {
-                return encoding_class;
-            }
-        }
-    }
-    unreachable!();
 }
 
 fn download_corpus(dir: &Path) {
