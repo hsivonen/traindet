@@ -66,7 +66,7 @@ use unicode_reader::CodePoints;
 
 const NON_STORED_CLASSES: usize = 6;
 
-const NON_STORED_CLASS_START: usize = 100;
+const ASCII_DIGIT: u8 = 100;
 
 struct CharMap {
     // Highest is U+25A0 BLACK SQUARE
@@ -1157,6 +1157,9 @@ fn generate_ascii_table(
             }
         }
     }
+    for i in b'0'..=b'9' {
+        vec[i as usize] = ASCII_DIGIT;
+    }
     vec
 }
 
@@ -1282,6 +1285,8 @@ const PLAUSIBLE_NEXT_TO_NON_ASCII_ALPHABETIC_ON_EITHER_SIDE: usize = 4;
 const PLAUSIBLE_NEXT_TO_ASCII_ALPHABETIC_ON_EITHER_SIDE: usize = 5;
 
 const WINDOWS_1256_ZWNJ: usize = 2;
+
+const ASCII_DIGIT: usize = 100;
 
 ",
         )
@@ -1554,7 +1559,10 @@ impl SingleByteData {
                 }
             } else {
                 // Current below stored, prev above
-                if current_usize == 0 || (is_windows_1256 && current_usize == WINDOWS_1256_ZWNJ) {
+                if current_usize == 0
+                    || current_usize == ASCII_DIGIT
+                    || (is_windows_1256 && current_usize == WINDOWS_1256_ZWNJ)
+                {
                     // Current is space-like
                     0
                 } else {
@@ -1580,7 +1588,8 @@ impl SingleByteData {
                             }
                         }
                         _ => {
-                            unreachable!();
+                            debug_assert_eq!(previous_usize, ASCII_DIGIT);
+                            0
                         }
                     }
                 }
@@ -1588,7 +1597,10 @@ impl SingleByteData {
         } else {
             if previous_usize < stored_boundary {
                 // Current above, prev below
-                if previous_usize == 0 || (is_windows_1256 && previous_usize == WINDOWS_1256_ZWNJ) {
+                if previous_usize == 0
+                    || previous_usize == ASCII_DIGIT
+                    || (is_windows_1256 && previous_usize == WINDOWS_1256_ZWNJ)
+                {
                     // Previous is space-like
                     0
                 } else {
@@ -1614,7 +1626,8 @@ impl SingleByteData {
                             }
                         }
                         _ => {
-                            unreachable!();
+                            debug_assert_eq!(current_usize, ASCII_DIGIT);
+                            0
                         }
                     }
                 }
