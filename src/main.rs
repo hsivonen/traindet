@@ -1286,7 +1286,7 @@ const PLAUSIBLE_NEXT_TO_ASCII_ALPHABETIC_ON_EITHER_SIDE: usize = 5;
 
 const WINDOWS_1256_ZWNJ: usize = 2;
 
-const ASCII_DIGIT: usize = 100;
+pub const ASCII_DIGIT: usize = 100;
 
 ",
         )
@@ -1631,6 +1631,8 @@ impl SingleByteData {
                         }
                     }
                 }
+            } else if current_usize == ASCII_DIGIT || previous_usize == ASCII_DIGIT {
+                0
             } else {
                 // Both above
                 IMPLAUSIBILITY_PENALTY
